@@ -1,0 +1,5 @@
+import { describe, expect, it } from 'vitest';
+import { StudentApi } from '../apps/api/application.js';
+import { PracticeLabService, type LabStore } from '../packages/accounting-domain/src/service.js';
+import type { CaseTemplate, StudentAttempt } from '../packages/accounting-domain/src/model.js';
+it('API identity comes only from authenticated context and student output excludes secrets',async()=>{const template:CaseTemplate={id:'t',slug:'x',title:'X',scenario:{},accounts:[],documents:[]};const attempts=new Map<string,StudentAttempt>();const store:LabStore={findTemplate:async()=>template,findAttemptForStudent:async(id,s)=>attempts.get(id)?.studentId===s?attempts.get(id)!:null,saveAttempt:async a=>{attempts.set(a.id,a)}};const api=new StudentApi(new PracticeLabService(store,{id:()=>crypto.randomUUID(),now:()=>new Date().toISOString()}));const result=await api.start({studentId:'authenticated-student'},'t');expect(JSON.stringify(result)).not.toMatch(/instructor|answer|solution|grading|score/i);expect((attempts.get(result.id)!).studentId).toBe('authenticated-student')});
