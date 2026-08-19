@@ -10,7 +10,7 @@
 Validated against PostgreSQL 16 on 2026-08-18:
 
 - `prisma validate`, `prisma generate`, `prisma migrate deploy`, and `prisma migrate status` passed; the database schema is current at `202608150001_p000_foundation`.
-- `pnpm run test:db` passed all 5 PostgreSQL enforcement tests.
-- `pnpm run test` passed all 16 unit, API, and database integration tests, including every approval gate above.
+- `pnpm run test:db` passed all 9 PostgreSQL enforcement tests.
+- `pnpm run test` passed all 20 unit, API, and database integration tests, including every approval gate above.
 - `pnpm run lint`, `pnpm run typecheck`, `pnpm run build`, and `git diff --check` passed.
 - Compiled API and web smoke checks passed (`qb-practice-lab-api:ok` and HTTP 200 with the P-000 foundation page).
