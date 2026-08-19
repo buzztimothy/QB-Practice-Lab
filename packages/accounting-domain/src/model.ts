@@ -8,3 +8,6 @@ export interface JournalEntry { readonly id: string; readonly attemptId: string;
 export interface AttemptAction { readonly sequence: number; readonly kind: 'ATTEMPT_CREATED' | 'JOURNAL_POSTED' | 'DOCUMENT_UNLOCKED' | 'ATTEMPT_RESET'; readonly at: string; readonly detail: Readonly<Record<string, unknown>> }
 export interface StudentAttempt { readonly id: string; readonly studentId: string; readonly templateId: string; readonly generation: number; readonly status: AttemptStatus; readonly accounts: readonly AttemptAccount[]; readonly entries: readonly JournalEntry[]; readonly actions: readonly AttemptAction[]; readonly unlockedDocumentIds: readonly string[] }
 export interface TrialBalanceRow { accountId: string; code: string; name: string; debitCents: number; creditCents: number }
+export interface FinancialStatementRow { accountId: string; code: string; name: string; amountCents: number }
+export interface ProfitAndLoss { revenue: FinancialStatementRow[]; expenses: FinancialStatementRow[]; netIncomeCents: number }
+export interface BalanceSheet { assets: FinancialStatementRow[]; liabilities: FinancialStatementRow[]; equity: FinancialStatementRow[]; currentEarningsCents: number; totalAssetsCents: number; totalLiabilitiesAndEquityCents: number }

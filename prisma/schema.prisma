@@ -1,12 +1,136 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
-enum AccountKind { ASSET LIABILITY EQUITY REVENUE EXPENSE }
-enum AttemptStatus { ACTIVE SUBMITTED RESET }
-model CaseTemplate { id String @id @default(uuid()) @db.Uuid slug String @unique title String studentScenario Json @map("student_scenario") instructorData Json @map("instructor_data") createdAt DateTime @default(now()) @map("created_at") accounts TemplateAccount[] documents TemplateDocument[] attempts StudentAttempt[] @@map("case_templates") }
-model TemplateAccount { id String @id @default(uuid()) @db.Uuid templateId String @map("template_id") @db.Uuid code String name String kind AccountKind template CaseTemplate @relation(fields:[templateId], references:[id], onDelete:Restrict) attemptAccounts AttemptAccount[] @@unique([templateId,id]) @@unique([templateId,code]) @@map("template_accounts") }
-model TemplateDocument { id String @id @default(uuid()) @db.Uuid templateId String @map("template_id") @db.Uuid title String studentContent Json @map("student_content") instructorData Json @map("instructor_data") unlockAfterAction Int @map("unlock_after_action") template CaseTemplate @relation(fields:[templateId],references:[id],onDelete:Restrict) @@unique([templateId,id]) @@map("template_documents") }
-model StudentAttempt { id String @id @default(uuid()) @db.Uuid studentId String @map("student_id") templateId String @map("template_id") @db.Uuid generation Int @default(1) status AttemptStatus @default(ACTIVE) createdAt DateTime @default(now()) @map("created_at") template CaseTemplate @relation(fields:[templateId],references:[id],onDelete:Restrict) accounts AttemptAccount[] entries JournalEntry[] actions AttemptAction[] @@index([studentId,id]) @@map("student_attempts") }
-model AttemptAccount { id String @id @default(uuid()) @db.Uuid attemptId String @map("attempt_id") @db.Uuid sourceTemplateAccountId String @map("source_template_account_id") @db.Uuid code String name String kind AccountKind attempt StudentAttempt @relation(fields:[attemptId],references:[id],onDelete:Cascade) source TemplateAccount @relation(fields:[sourceTemplateAccountId],references:[id],onDelete:Restrict) lines JournalLine[] @@unique([attemptId,id]) @@unique([attemptId,code]) @@map("attempt_accounts") }
-model JournalEntry { id String @id @default(uuid()) @db.Uuid attemptId String @map("attempt_id") @db.Uuid description String occurredOn DateTime @map("occurred_on") @db.Date createdAt DateTime @default(now()) @map("created_at") attempt StudentAttempt @relation(fields:[attemptId],references:[id],onDelete:Cascade) lines JournalLine[] @@unique([attemptId,id]) @@map("journal_entries") }
-model JournalLine { id String @id @default(uuid()) @db.Uuid entryId String @map("entry_id") @db.Uuid attemptId String @map("attempt_id") @db.Uuid attemptAccountId String @map("attempt_account_id") @db.Uuid debitCents BigInt @default(0) @map("debit_cents") creditCents BigInt @default(0) @map("credit_cents") entry JournalEntry @relation(fields:[attemptId,entryId],references:[attemptId,id],onDelete:Cascade) account AttemptAccount @relation(fields:[attemptId,attemptAccountId],references:[attemptId,id],onDelete:Restrict) @@index([entryId]) @@map("journal_lines") }
-model AttemptAction { id String @id @default(uuid()) @db.Uuid attemptId String @map("attempt_id") @db.Uuid sequence Int kind String detail Json @default("{}") createdAt DateTime @default(now()) @map("created_at") attempt StudentAttempt @relation(fields:[attemptId],references:[id],onDelete:Cascade) @@unique([attemptId,sequence]) @@map("attempt_actions") }
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountKind {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum AttemptStatus {
+  ACTIVE
+  SUBMITTED
+  RESET
+}
+
+model CaseTemplate {
+  id              String             @id @default(uuid()) @db.Uuid
+  slug            String             @unique
+  title           String
+  studentScenario Json               @map("student_scenario")
+  instructorData  Json               @map("instructor_data")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  accounts        TemplateAccount[]
+  documents       TemplateDocument[]
+  attempts        StudentAttempt[]
+
+  @@map("case_templates")
+}
+
+model TemplateAccount {
+  id              String           @id @default(uuid()) @db.Uuid
+  templateId      String           @map("template_id") @db.Uuid
+  code            String
+  name            String
+  kind            AccountKind
+  template        CaseTemplate     @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  attemptAccounts AttemptAccount[]
+
+  @@unique([templateId, id])
+  @@unique([templateId, code])
+  @@map("template_accounts")
+}
+
+model TemplateDocument {
+  id                String       @id @default(uuid()) @db.Uuid
+  templateId        String       @map("template_id") @db.Uuid
+  title             String
+  studentContent    Json         @map("student_content")
+  instructorData    Json         @map("instructor_data")
+  unlockAfterAction Int          @map("unlock_after_action")
+  template          CaseTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@unique([templateId, id])
+  @@map("template_documents")
+}
+
+model StudentAttempt {
+  id         String           @id @default(uuid()) @db.Uuid
+  studentId  String           @map("student_id")
+  templateId String           @map("template_id") @db.Uuid
+  generation Int              @default(1)
+  status     AttemptStatus    @default(ACTIVE)
+  createdAt  DateTime         @default(now()) @map("created_at")
+  template   CaseTemplate     @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  accounts   AttemptAccount[]
+  entries    JournalEntry[]
+  actions    AttemptAction[]
+
+  @@unique([studentId, templateId, generation])
+  @@index([studentId, id])
+  @@map("student_attempts")
+}
+
+model AttemptAccount {
+  id                      String          @id @default(uuid()) @db.Uuid
+  attemptId               String          @map("attempt_id") @db.Uuid
+  sourceTemplateAccountId String          @map("source_template_account_id") @db.Uuid
+  code                    String
+  name                    String
+  kind                    AccountKind
+  attempt                 StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  source                  TemplateAccount @relation(fields: [sourceTemplateAccountId], references: [id], onDelete: Restrict)
+  lines                   JournalLine[]
+
+  @@unique([attemptId, id])
+  @@unique([attemptId, code])
+  @@map("attempt_accounts")
+}
+
+model JournalEntry {
+  id          String         @id @default(uuid()) @db.Uuid
+  attemptId   String         @map("attempt_id") @db.Uuid
+  description String
+  occurredOn  DateTime       @map("occurred_on") @db.Date
+  createdAt   DateTime       @default(now()) @map("created_at")
+  attempt     StudentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  lines       JournalLine[]
+
+  @@unique([attemptId, id])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id               String         @id @default(uuid()) @db.Uuid
+  entryId          String         @map("entry_id") @db.Uuid
+  attemptId        String         @map("attempt_id") @db.Uuid
+  attemptAccountId String         @map("attempt_account_id") @db.Uuid
+  debitCents       BigInt         @default(0) @map("debit_cents")
+  creditCents      BigInt         @default(0) @map("credit_cents")
+  entry            JournalEntry   @relation(fields: [attemptId, entryId], references: [attemptId, id], onDelete: Cascade)
+  account          AttemptAccount @relation(fields: [attemptId, attemptAccountId], references: [attemptId, id], onDelete: Restrict)
+
+  @@index([entryId])
+  @@map("journal_lines")
+}
+
+model AttemptAction {
+  id        String         @id @default(uuid()) @db.Uuid
+  attemptId String         @map("attempt_id") @db.Uuid
+  sequence  Int
+  kind      String
+  detail    Json           @default("{}")
+  createdAt DateTime       @default(now()) @map("created_at")
+  attempt   StudentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, sequence])
+  @@map("attempt_actions")
+}

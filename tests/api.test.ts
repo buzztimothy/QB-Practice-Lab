@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { StudentApi } from '../apps/api/application.js';
 import { PracticeLabService, type LabStore } from '../packages/accounting-domain/src/service.js';
 import type { CaseTemplate, StudentAttempt } from '../packages/accounting-domain/src/model.js';
