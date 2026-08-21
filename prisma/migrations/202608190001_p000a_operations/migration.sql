@@ -4,6 +4,8 @@ CREATE TYPE "ReconciliationStatus" AS ENUM ('IN_PROGRESS','COMPLETED');
 ALTER TABLE "template_accounts" ADD COLUMN "operational_role" "OperationalAccountRole";
 ALTER TABLE "attempt_accounts" ADD COLUMN "operational_role" "OperationalAccountRole";
 ALTER TABLE "journal_entries" ADD COLUMN "source_type" TEXT, ADD COLUMN "source_id" UUID;
+CREATE FUNCTION assert_attempt_account_operational_role() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE source_role "OperationalAccountRole"; BEGIN SELECT operational_role INTO source_role FROM template_accounts WHERE id=NEW.source_template_account_id; IF NEW.operational_role IS DISTINCT FROM source_role THEN RAISE EXCEPTION 'attempt account role does not match template source'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER attempt_account_operational_role_match BEFORE INSERT OR UPDATE OF source_template_account_id,operational_role ON "attempt_accounts" FOR EACH ROW EXECUTE FUNCTION assert_attempt_account_operational_role();
 
 CREATE TABLE "template_customers" ("id" UUID PRIMARY KEY,"template_id" UUID NOT NULL REFERENCES "case_templates"("id") ON DELETE RESTRICT,"name" TEXT NOT NULL,"active" BOOLEAN NOT NULL DEFAULT true,UNIQUE("template_id","id"));
 CREATE TRIGGER template_customers_immutable BEFORE UPDATE OR DELETE ON "template_customers" FOR EACH ROW EXECUTE FUNCTION reject_template_mutation();
@@ -27,3 +29,33 @@ CREATE FUNCTION assert_reconciliation_line_attempt() RETURNS trigger LANGUAGE pl
 CREATE TRIGGER reconciliation_line_attempt_match BEFORE INSERT OR UPDATE ON "reconciliation_lines" FOR EACH ROW EXECUTE FUNCTION assert_reconciliation_line_attempt();
 CREATE FUNCTION assert_reconciliation_completed() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE movement BIGINT; mismatches BIGINT; kind "AccountKind"; BEGIN IF NEW.status='COMPLETED' THEN SELECT a.kind INTO kind FROM attempt_accounts a WHERE a.id=NEW.account_id AND a.attempt_id=NEW.attempt_id; SELECT COALESCE(SUM(CASE WHEN kind='LIABILITY' THEN l.credit_cents-l.debit_cents ELSE l.debit_cents-l.credit_cents END),0),COUNT(*) FILTER(WHERE rl.fingerprint<>(l.debit_cents||':'||l.credit_cents||':'||l.attempt_account_id)) INTO movement,mismatches FROM reconciliation_lines rl JOIN journal_lines l ON l.id=rl.journal_line_id WHERE rl.attempt_id=NEW.attempt_id AND rl.reconciliation_id=NEW.id; IF mismatches<>0 OR NEW.beginning_balance_cents+movement<>NEW.ending_balance_cents THEN RAISE EXCEPTION 'reconciliation is not balanced'; END IF; END IF; RETURN NEW; END $$;
 CREATE TRIGGER reconciliation_completion_valid BEFORE INSERT OR UPDATE OF status,completed_at ON "reconciliations" FOR EACH ROW EXECUTE FUNCTION assert_reconciliation_completed();
+
+CREATE FUNCTION assert_operational_account_roles() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE role "OperationalAccountRole"; kind "AccountKind"; BEGIN
+  IF TG_TABLE_NAME='invoices' THEN SELECT operational_role INTO role FROM attempt_accounts WHERE attempt_id=NEW.attempt_id AND id=NEW.ar_account_id; IF role IS DISTINCT FROM 'ACCOUNTS_RECEIVABLE' THEN RAISE EXCEPTION 'invoice account role is invalid'; END IF;
+  ELSIF TG_TABLE_NAME='invoice_lines' THEN SELECT a.kind INTO kind FROM attempt_accounts a WHERE a.attempt_id=NEW.attempt_id AND a.id=NEW.revenue_account_id; IF kind IS DISTINCT FROM 'REVENUE' THEN RAISE EXCEPTION 'invoice revenue account is invalid'; END IF;
+  ELSIF TG_TABLE_NAME='customer_payments' THEN SELECT operational_role INTO role FROM attempt_accounts WHERE attempt_id=NEW.attempt_id AND id=NEW.ar_account_id; IF role IS DISTINCT FROM 'ACCOUNTS_RECEIVABLE' THEN RAISE EXCEPTION 'payment A/R account role is invalid'; END IF; SELECT operational_role INTO role FROM attempt_accounts WHERE attempt_id=NEW.attempt_id AND id=NEW.destination_account_id; IF role IS NULL OR role NOT IN ('BANK','UNDEPOSITED_FUNDS') THEN RAISE EXCEPTION 'payment destination account role is invalid'; END IF;
+  ELSIF TG_TABLE_NAME='bank_deposits' THEN SELECT operational_role INTO role FROM attempt_accounts WHERE attempt_id=NEW.attempt_id AND id=NEW.bank_account_id; IF role IS DISTINCT FROM 'BANK' THEN RAISE EXCEPTION 'deposit bank account role is invalid'; END IF;
+  ELSIF TG_TABLE_NAME='reconciliations' THEN SELECT operational_role INTO role FROM attempt_accounts WHERE attempt_id=NEW.attempt_id AND id=NEW.account_id; IF role IS NULL OR role NOT IN ('BANK','CREDIT_CARD') THEN RAISE EXCEPTION 'reconciliation account role is invalid'; END IF;
+  END IF; RETURN NEW;
+END $$;
+CREATE TRIGGER invoice_account_roles BEFORE INSERT OR UPDATE OF attempt_id,ar_account_id ON "invoices" FOR EACH ROW EXECUTE FUNCTION assert_operational_account_roles();
+CREATE TRIGGER invoice_line_account_role BEFORE INSERT OR UPDATE OF attempt_id,revenue_account_id ON "invoice_lines" FOR EACH ROW EXECUTE FUNCTION assert_operational_account_roles();
+CREATE TRIGGER payment_account_roles BEFORE INSERT OR UPDATE OF attempt_id,ar_account_id,destination_account_id ON "customer_payments" FOR EACH ROW EXECUTE FUNCTION assert_operational_account_roles();
+CREATE TRIGGER deposit_account_role BEFORE INSERT OR UPDATE OF attempt_id,bank_account_id ON "bank_deposits" FOR EACH ROW EXECUTE FUNCTION assert_operational_account_roles();
+CREATE TRIGGER reconciliation_account_role BEFORE INSERT OR UPDATE OF attempt_id,account_id ON "reconciliations" FOR EACH ROW EXECUTE FUNCTION assert_operational_account_roles();
+
+CREATE FUNCTION assert_bank_deposit_complete() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE aid UUID; did UUID; expected BIGINT; linked BIGINT; links BIGINT; invalid BIGINT; BEGIN
+  IF TG_TABLE_NAME='bank_deposits' THEN aid=COALESCE(NEW.attempt_id,OLD.attempt_id); did=COALESCE(NEW.id,OLD.id); ELSE aid=COALESCE(NEW.attempt_id,OLD.attempt_id); did=COALESCE(NEW.deposit_id,OLD.deposit_id); END IF;
+  SELECT amount_cents INTO expected FROM bank_deposits WHERE attempt_id=aid AND id=did;
+  IF expected IS NULL THEN IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END IF;
+  SELECT COUNT(*),COALESCE(SUM(p.amount_cents),0),COUNT(*) FILTER (WHERE a.operational_role IS DISTINCT FROM 'UNDEPOSITED_FUNDS') INTO links,linked,invalid FROM bank_deposit_payments link JOIN customer_payments p ON p.attempt_id=link.attempt_id AND p.id=link.payment_id JOIN attempt_accounts a ON a.attempt_id=p.attempt_id AND a.id=p.destination_account_id WHERE link.attempt_id=aid AND link.deposit_id=did;
+  IF links=0 OR linked<>expected OR invalid<>0 THEN RAISE EXCEPTION 'bank deposit membership is invalid'; END IF;
+  IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END $$;
+CREATE CONSTRAINT TRIGGER bank_deposit_complete AFTER INSERT OR UPDATE OF amount_cents ON "bank_deposits" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION assert_bank_deposit_complete();
+CREATE CONSTRAINT TRIGGER bank_deposit_membership_complete AFTER INSERT OR UPDATE OR DELETE ON "bank_deposit_payments" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION assert_bank_deposit_complete();
+
+-- P-000A defines template provenance only for source entities that actually exist.
+-- Operational invoice/payment template records are not part of this scope.
+ALTER TABLE "invoices" DROP COLUMN "source_template_id";
+ALTER TABLE "customer_payments" DROP COLUMN "source_template_id";

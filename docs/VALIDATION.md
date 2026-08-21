@@ -17,11 +17,11 @@ Validated against PostgreSQL 16 on 2026-08-18:
 
 ## P-000A executed validation
 
-Validated against a fresh disposable PostgreSQL 16 database on 2026-08-19:
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-21, including final-review regressions:
 
 - Frozen pnpm installation and the approved Prisma/esbuild rebuild scripts completed successfully.
 - Prisma schema validation and generation passed; both migrations deployed and status reported current.
-- All 43 unit, API/security, P-000 regression, and PostgreSQL integration tests passed.
-- P-000A coverage includes invoice/payment/application, A/R control detection, Undeposited Funds deposits, cash/accrual P&L, card accounting, reconciliation completion/history, duplicate/cross-attempt rejection, and student serialization secrecy.
+- All 46 unit, API/security, P-000 regression, and PostgreSQL integration tests passed.
+- P-000A coverage includes invoice/payment/application, A/R control detection, Undeposited Funds deposits, cash/accrual P&L, card accounting, reconciliation completion/history, duplicate/cross-attempt rejection, student serialization secrecy, operational account-role enforcement, deposit-total enforcement, and cumulative multi-line cash-allocation rounding.
 - `pnpm run lint`, `pnpm run typecheck`, `pnpm run build`, and `git diff --check` passed.
 - Compiled API and web smoke checks passed.

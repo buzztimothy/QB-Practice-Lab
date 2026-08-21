@@ -178,7 +178,6 @@ model Invoice {
   customerId      String          @map("customer_id") @db.Uuid
   arAccountId     String          @map("ar_account_id") @db.Uuid
   journalEntryId  String          @map("journal_entry_id") @db.Uuid
-  sourceTemplateId String?        @map("source_template_id") @db.Uuid
   number          String
   invoiceDate     DateTime        @map("invoice_date") @db.Date
   dueDate         DateTime        @map("due_date") @db.Date
@@ -215,7 +214,6 @@ model CustomerPayment {
   destinationAccountId String          @map("destination_account_id") @db.Uuid
   arAccountId          String          @map("ar_account_id") @db.Uuid
   journalEntryId       String          @map("journal_entry_id") @db.Uuid
-  sourceTemplateId     String?         @map("source_template_id") @db.Uuid
   paymentDate          DateTime        @map("payment_date") @db.Date
   amountCents          BigInt          @map("amount_cents")
   method               String?
