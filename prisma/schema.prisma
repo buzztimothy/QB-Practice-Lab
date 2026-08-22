@@ -21,6 +21,24 @@ enum AttemptStatus {
   RESET
 }
 
+enum OperationalAccountRole {
+  BANK
+  UNDEPOSITED_FUNDS
+  ACCOUNTS_RECEIVABLE
+  CREDIT_CARD
+}
+
+enum InvoiceStatus {
+  OPEN
+  PAID
+  VOID
+}
+
+enum ReconciliationStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
 model CaseTemplate {
   id              String             @id @default(uuid()) @db.Uuid
   slug            String             @unique
@@ -31,8 +49,21 @@ model CaseTemplate {
   accounts        TemplateAccount[]
   documents       TemplateDocument[]
   attempts        StudentAttempt[]
+  customers       TemplateCustomer[]
 
   @@map("case_templates")
+}
+
+model TemplateCustomer {
+  id         String            @id @default(uuid()) @db.Uuid
+  templateId String            @map("template_id") @db.Uuid
+  name       String
+  active     Boolean           @default(true)
+  template   CaseTemplate      @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  customers  AttemptCustomer[]
+
+  @@unique([templateId, id])
+  @@map("template_customers")
 }
 
 model TemplateAccount {
@@ -41,6 +72,7 @@ model TemplateAccount {
   code            String
   name            String
   kind            AccountKind
+  operationalRole OperationalAccountRole? @map("operational_role")
   template        CaseTemplate     @relation(fields: [templateId], references: [id], onDelete: Restrict)
   attemptAccounts AttemptAccount[]
 
@@ -73,10 +105,30 @@ model StudentAttempt {
   accounts   AttemptAccount[]
   entries    JournalEntry[]
   actions    AttemptAction[]
+  customers  AttemptCustomer[]
+  invoices   Invoice[]
+  payments   CustomerPayment[]
+  deposits   BankDeposit[]
+  reconciliations Reconciliation[]
 
   @@unique([studentId, templateId, generation])
   @@index([studentId, id])
   @@map("student_attempts")
+}
+
+model AttemptCustomer {
+  id                       String            @id @default(uuid()) @db.Uuid
+  attemptId                String            @map("attempt_id") @db.Uuid
+  sourceTemplateCustomerId String?           @map("source_template_customer_id") @db.Uuid
+  name                     String
+  active                   Boolean           @default(true)
+  attempt                  StudentAttempt    @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  source                   TemplateCustomer? @relation(fields: [sourceTemplateCustomerId], references: [id], onDelete: Restrict)
+  invoices                 Invoice[]
+  payments                 CustomerPayment[]
+
+  @@unique([attemptId, id])
+  @@map("attempt_customers")
 }
 
 model AttemptAccount {
@@ -86,9 +138,16 @@ model AttemptAccount {
   code                    String
   name                    String
   kind                    AccountKind
+  operationalRole         OperationalAccountRole? @map("operational_role")
   attempt                 StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   source                  TemplateAccount @relation(fields: [sourceTemplateAccountId], references: [id], onDelete: Restrict)
   lines                   JournalLine[]
+  invoiceLines            InvoiceLine[]
+  invoiceAr               Invoice[]       @relation("InvoiceArAccount")
+  paymentDestinations     CustomerPayment[] @relation("PaymentDestination")
+  paymentAr               CustomerPayment[] @relation("PaymentArAccount")
+  depositBanks            BankDeposit[]
+  reconciliations         Reconciliation[]
 
   @@unique([attemptId, id])
   @@unique([attemptId, code])
@@ -103,9 +162,142 @@ model JournalEntry {
   createdAt   DateTime       @default(now()) @map("created_at")
   attempt     StudentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   lines       JournalLine[]
+  sourceType  String?        @map("source_type")
+  sourceId    String?        @map("source_id") @db.Uuid
+  invoices    Invoice[]
+  payments    CustomerPayment[]
+  deposits    BankDeposit[]
 
   @@unique([attemptId, id])
   @@map("journal_entries")
+}
+
+model Invoice {
+  id              String          @id @default(uuid()) @db.Uuid
+  attemptId       String          @map("attempt_id") @db.Uuid
+  customerId      String          @map("customer_id") @db.Uuid
+  arAccountId     String          @map("ar_account_id") @db.Uuid
+  journalEntryId  String          @map("journal_entry_id") @db.Uuid
+  number          String
+  invoiceDate     DateTime        @map("invoice_date") @db.Date
+  dueDate         DateTime        @map("due_date") @db.Date
+  status          InvoiceStatus   @default(OPEN)
+  attempt         StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  customer        AttemptCustomer @relation(fields: [attemptId, customerId], references: [attemptId, id], onDelete: Restrict)
+  arAccount       AttemptAccount  @relation("InvoiceArAccount", fields: [attemptId, arAccountId], references: [attemptId, id], onDelete: Restrict)
+  journalEntry    JournalEntry    @relation(fields: [attemptId, journalEntryId], references: [attemptId, id], onDelete: Restrict)
+  lines           InvoiceLine[]
+  applications    PaymentApplication[]
+
+  @@unique([attemptId, id])
+  @@unique([attemptId, number])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id               String         @id @default(uuid()) @db.Uuid
+  attemptId        String         @map("attempt_id") @db.Uuid
+  invoiceId        String         @map("invoice_id") @db.Uuid
+  revenueAccountId String         @map("revenue_account_id") @db.Uuid
+  description      String
+  amountCents      BigInt         @map("amount_cents")
+  invoice          Invoice        @relation(fields: [attemptId, invoiceId], references: [attemptId, id], onDelete: Cascade)
+  revenueAccount   AttemptAccount @relation(fields: [attemptId, revenueAccountId], references: [attemptId, id], onDelete: Restrict)
+
+  @@map("invoice_lines")
+}
+
+model CustomerPayment {
+  id                   String          @id @default(uuid()) @db.Uuid
+  attemptId            String          @map("attempt_id") @db.Uuid
+  customerId           String          @map("customer_id") @db.Uuid
+  destinationAccountId String          @map("destination_account_id") @db.Uuid
+  arAccountId          String          @map("ar_account_id") @db.Uuid
+  journalEntryId       String          @map("journal_entry_id") @db.Uuid
+  paymentDate          DateTime        @map("payment_date") @db.Date
+  amountCents          BigInt          @map("amount_cents")
+  method               String?
+  reference            String?
+  attempt              StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  customer             AttemptCustomer @relation(fields: [attemptId, customerId], references: [attemptId, id], onDelete: Restrict)
+  destinationAccount   AttemptAccount  @relation("PaymentDestination", fields: [attemptId, destinationAccountId], references: [attemptId, id], onDelete: Restrict)
+  arAccount            AttemptAccount  @relation("PaymentArAccount", fields: [attemptId, arAccountId], references: [attemptId, id], onDelete: Restrict)
+  journalEntry         JournalEntry    @relation(fields: [attemptId, journalEntryId], references: [attemptId, id], onDelete: Restrict)
+  applications         PaymentApplication[]
+  depositLinks         BankDepositPayment[]
+
+  @@unique([attemptId, id])
+  @@map("customer_payments")
+}
+
+model PaymentApplication {
+  id          String          @id @default(uuid()) @db.Uuid
+  attemptId   String          @map("attempt_id") @db.Uuid
+  paymentId   String          @map("payment_id") @db.Uuid
+  invoiceId   String          @map("invoice_id") @db.Uuid
+  amountCents BigInt          @map("amount_cents")
+  appliedAt   DateTime        @default(now()) @map("applied_at")
+  payment     CustomerPayment @relation(fields: [attemptId, paymentId], references: [attemptId, id], onDelete: Cascade)
+  invoice     Invoice         @relation(fields: [attemptId, invoiceId], references: [attemptId, id], onDelete: Cascade)
+
+  @@map("payment_applications")
+}
+
+model BankDeposit {
+  id             String               @id @default(uuid()) @db.Uuid
+  attemptId      String               @map("attempt_id") @db.Uuid
+  bankAccountId  String               @map("bank_account_id") @db.Uuid
+  journalEntryId String               @map("journal_entry_id") @db.Uuid
+  depositDate    DateTime             @map("deposit_date") @db.Date
+  amountCents    BigInt               @map("amount_cents")
+  attempt        StudentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  bankAccount    AttemptAccount       @relation(fields: [attemptId, bankAccountId], references: [attemptId, id], onDelete: Restrict)
+  journalEntry   JournalEntry         @relation(fields: [attemptId, journalEntryId], references: [attemptId, id], onDelete: Restrict)
+  paymentLinks   BankDepositPayment[]
+
+  @@unique([attemptId, id])
+  @@map("bank_deposits")
+}
+
+model BankDepositPayment {
+  depositId String          @map("deposit_id") @db.Uuid
+  paymentId String          @map("payment_id") @db.Uuid
+  attemptId String          @map("attempt_id") @db.Uuid
+  deposit   BankDeposit     @relation(fields: [attemptId, depositId], references: [attemptId, id], onDelete: Cascade)
+  payment   CustomerPayment @relation(fields: [attemptId, paymentId], references: [attemptId, id], onDelete: Restrict)
+
+  @@id([attemptId, depositId, paymentId])
+  @@unique([attemptId, paymentId])
+  @@map("bank_deposit_payments")
+}
+
+model Reconciliation {
+  id                    String               @id @default(uuid()) @db.Uuid
+  attemptId             String               @map("attempt_id") @db.Uuid
+  accountId             String               @map("account_id") @db.Uuid
+  beginningDate         DateTime             @map("beginning_date") @db.Date
+  endingDate            DateTime             @map("ending_date") @db.Date
+  beginningBalanceCents BigInt               @map("beginning_balance_cents")
+  endingBalanceCents    BigInt               @map("ending_balance_cents")
+  status                ReconciliationStatus @default(IN_PROGRESS)
+  completedAt           DateTime?            @map("completed_at")
+  attempt               StudentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  account               AttemptAccount       @relation(fields: [attemptId, accountId], references: [attemptId, id], onDelete: Restrict)
+  clearedLines          ReconciliationLine[]
+
+  @@unique([attemptId, id])
+  @@map("reconciliations")
+}
+
+model ReconciliationLine {
+  reconciliationId String         @map("reconciliation_id") @db.Uuid
+  attemptId        String         @map("attempt_id") @db.Uuid
+  journalLineId    String         @map("journal_line_id") @db.Uuid
+  fingerprint      String
+  reconciliation   Reconciliation @relation(fields: [attemptId, reconciliationId], references: [attemptId, id], onDelete: Cascade)
+
+  @@id([attemptId, reconciliationId, journalLineId])
+  @@map("reconciliation_lines")
 }
 
 model JournalLine {
