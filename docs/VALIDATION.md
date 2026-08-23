@@ -34,5 +34,6 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-22:
 - Prisma schema validation and generation passed; both migrations deployed and status reported current.
 - All 59 P-001, P-000A, P-000, API/security, and PostgreSQL integration tests passed.
 - The deterministic Suncoast master tests prove the opening position, monthly cash targets and category totals, natural accrual results, operational lifecycles, source identity, A/R control, zero Undeposited Funds, card treatment, statement reconciliations, ledger statements, and instructor-data secrecy.
+- Final review fixed a statement-independence defect: checking and Visa endpoints are now fixed authoritative case facts rather than values derived from the ledger being reconciled, with fail-closed mismatch coverage.
 - `pnpm run lint`, `pnpm run typecheck`, `pnpm run build`, and `git diff --check` passed.
 - Compiled API and web smoke checks passed.
