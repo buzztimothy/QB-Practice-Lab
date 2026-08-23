@@ -25,3 +25,14 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-21, inclu
 - P-000A coverage includes invoice/payment/application, A/R control detection, Undeposited Funds deposits, cash/accrual P&L, card accounting, reconciliation completion/history, duplicate/cross-attempt rejection, student serialization secrecy, operational account-role enforcement, deposit-total enforcement, and cumulative multi-line cash-allocation rounding.
 - `pnpm run lint`, `pnpm run typecheck`, `pnpm run build`, and `git diff --check` passed.
 - Compiled API and web smoke checks passed.
+
+## P-001 executed validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-22:
+
+- Frozen pnpm installation and the approved Prisma/esbuild rebuild completed successfully.
+- Prisma schema validation and generation passed; both migrations deployed and status reported current.
+- All 59 P-001, P-000A, P-000, API/security, and PostgreSQL integration tests passed.
+- The deterministic Suncoast master tests prove the opening position, monthly cash targets and category totals, natural accrual results, operational lifecycles, source identity, A/R control, zero Undeposited Funds, card treatment, statement reconciliations, ledger statements, and instructor-data secrecy.
+- `pnpm run lint`, `pnpm run typecheck`, `pnpm run build`, and `git diff --check` passed.
+- Compiled API and web smoke checks passed.
