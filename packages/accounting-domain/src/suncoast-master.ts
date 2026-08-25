@@ -5,7 +5,8 @@ import { assertBalanced, balanceSheet, trialBalance, type IdClock, type PostLine
 
 export const SUNCOAST_TEMPLATE_ID='suncoast-home-services-clean-master';
 export const SUNCOAST_ATTEMPT_ID='suncoast-master-attempt';
-export const suncoastAuthoritativeStatements=Object.freeze({checking:{beginningBalanceCents:6992500,endingBalanceCents:8467200},visa:{beginningBalanceCents:575000,endingBalanceCents:402172}});
+export const suncoastAuthoritativeStatements=Object.freeze({checking:{beginningBalanceCents:6992500,endingBalanceCents:8367200},visa:{beginningBalanceCents:575000,endingBalanceCents:402172}});
+export const suncoastPayrollTruth=Object.freeze({payrollPeriod:{from:'2026-06-01',through:'2026-06-14'},payDate:'2026-06-14',grossWagesCents:980000,employeeFederalWithholdingCents:105000,employeeStateLocalWithholdingCents:0,employeeFicaWithholdingCents:74970,employerFicaExpenseCents:74970,employerUnemploymentTaxExpenseCents:15030,employerPayrollTaxExpenseCents:90000,totalPayrollLiabilitiesGeneratedCents:269970,netEmployeePayCents:800030,providerFeeCents:10000,withdrawals:Object.freeze({netPayCents:800030,taxFundingCents:269970,providerFeeCents:10000,totalCents:1080000}),liabilityEndingBalanceCents:0});
 
 type AccountSpec={code:string;name:string;kind:AccountKind;operationalRole?:OperationalAccountRole};
 const accountSpecs:readonly AccountSpec[]=[
@@ -33,6 +34,7 @@ const accountSpecs:readonly AccountSpec[]=[
   {code:'6050',name:'Meals',kind:'EXPENSE'},
   {code:'6060',name:'Office Expense',kind:'EXPENSE'},
   {code:'6070',name:'Payroll Expense',kind:'EXPENSE'},
+  {code:'6075',name:'Employer Payroll Tax Expense',kind:'EXPENSE'},
   {code:'6080',name:'Professional Fees',kind:'EXPENSE'},
   {code:'6090',name:'Rent',kind:'EXPENSE'},
   {code:'6100',name:'Repairs & Maintenance',kind:'EXPENSE'},
@@ -54,6 +56,7 @@ export const suncoastInstructorFacts=Object.freeze({
   palmBreezeReceipt:'Palm Breeze Property Management legitimately paid $9,500 against its supported painting invoice.',
   martinezLifecycle:'Susan Martinez paid the $3,850 painting invoice on June 12 through Undeposited Funds and a bank deposit, with revenue recognized once.',
   reynoldsApplication:'David Reynolds paid $1,850, correctly applied to Invoice A; Invoice B for $2,275 remains open.',
+  payrollProvider:suncoastPayrollTruth,
 });
 
 export interface SuncoastSourceRecord {id:string;date:string;counterparty:string;amountCents:number;purpose:string;entryId:string;documentRef:string}
@@ -125,8 +128,12 @@ export async function buildSuncoastMasterCase():Promise<SuncoastMasterCase>{
   for(const [date,vendor,expense,value,ref] of [
     ['2026-04-02','Fort Myers Commerce Center','Rent',cents(2500),'APR-RENT'],['2026-04-15','Gulf Coast Payroll Services','Payroll Expense',cents(9000),'APR-PAYROLL'],['2026-04-20','Suncoast Paint Supply','Materials & Supplies',cents(4200),'APR-MATERIALS'],['2026-04-22','Gulf Coast Insurance','Insurance',cents(950),'APR-INSURANCE'],['2026-04-25','Verizon Wireless','Telephone & Internet',cents(310),'APR-TELECOM'],['2026-04-28','Shell','Vehicle Expense',cents(780),'APR-FUEL'],
     ['2026-05-02','Fort Myers Commerce Center','Rent',cents(2500),'MAY-RENT'],['2026-05-15','Gulf Coast Payroll Services','Payroll Expense',cents(9400),'MAY-PAYROLL'],['2026-05-18',"Lowe's",'Materials & Supplies',cents(5100),'MAY-MATERIALS'],['2026-05-21','Comcast Business','Telephone & Internet',cents(295),'MAY-INTERNET'],['2026-05-24','QuickBooks','Software & Subscriptions',cents(100),'MAY-SOFTWARE'],['2026-05-27','Circle K','Vehicle Expense',cents(840),'MAY-FUEL'],
-    ['2026-06-02','Fort Myers Commerce Center','Rent',cents(2500),'JUN-RENT'],['2026-06-14','Gulf Coast Payroll Services','Payroll Expense',cents(9800),'JUN-PAYROLL'],['2026-06-18','Office Depot','Office Expense',cents(318),'JUN-OFFICE'],['2026-06-20','Google','Advertising & Marketing',cents(750),'JUN-GOOGLE'],['2026-06-21','Verizon Wireless','Telephone & Internet',cents(315),'JUN-TELECOM'],['2026-06-23','Shell','Vehicle Expense',cents(910),'JUN-FUEL'],['2026-06-29','Gulf Coast Community Bank','Bank Fees',cents(35),'JUN-BANK-FEE'],
+    ['2026-06-02','Fort Myers Commerce Center','Rent',cents(2500),'JUN-RENT'],['2026-06-18','Office Depot','Office Expense',cents(318),'JUN-OFFICE'],['2026-06-20','Google','Advertising & Marketing',cents(750),'JUN-GOOGLE'],['2026-06-21','Verizon Wireless','Telephone & Internet',cents(315),'JUN-TELECOM'],['2026-06-23','Shell','Vehicle Expense',cents(910),'JUN-FUEL'],['2026-06-29','Gulf Coast Community Bank','Bank Fees',cents(35),'JUN-BANK-FEE'],
   ] as const)bankExpense(date,vendor,expense,value,ref);
+
+  append('2026-06-14','June payroll — recognize wages, taxes, and net-pay withdrawal',[{attemptAccountId:id('Payroll Expense'),debitCents:suncoastPayrollTruth.grossWagesCents},{attemptAccountId:id('Employer Payroll Tax Expense'),debitCents:suncoastPayrollTruth.employerPayrollTaxExpenseCents},{attemptAccountId:id('Payroll Liabilities'),creditCents:suncoastPayrollTruth.totalPayrollLiabilitiesGeneratedCents},{attemptAccountId:id('Operating Checking'),creditCents:suncoastPayrollTruth.netEmployeePayCents}],'PAYROLL_CYCLE','Gulf Coast Payroll Services','JUN-PAYROLL-REPORT','Authoritative June payroll report and net-pay funding');
+  append('2026-06-14','June payroll — tax funding and remittance',[{attemptAccountId:id('Payroll Liabilities'),debitCents:suncoastPayrollTruth.totalPayrollLiabilitiesGeneratedCents},{attemptAccountId:id('Operating Checking'),creditCents:suncoastPayrollTruth.withdrawals.taxFundingCents}],'PAYROLL_TAX_REMITTANCE','Gulf Coast Payroll Services','JUN-PAYROLL-TAX','Provider tax funding and same-day remittance');
+  append('2026-06-14','June payroll — provider fee',[{attemptAccountId:id('Professional Fees'),debitCents:suncoastPayrollTruth.providerFeeCents},{attemptAccountId:id('Operating Checking'),creditCents:suncoastPayrollTruth.withdrawals.providerFeeCents}],'PAYROLL_PROVIDER_FEE','Gulf Coast Payroll Services','JUN-PAYROLL-FEE','Separate payroll-provider service fee');
 
   append('2026-06-08','Commercial pressure washer',[{attemptAccountId:id('Tools & Equipment'),debitCents:cents(6800)},{attemptAccountId:id('Operating Checking'),creditCents:cents(6800)}],'EQUIPMENT_PURCHASE','Fort Myers Equipment Rental','EQUIP-PW-0608','Commercial pressure washer capitalized as equipment');
   append('2026-06-17','Enclosed trailer deposit',[{attemptAccountId:id('Trailer Deposit'),debitCents:cents(2400)},{attemptAccountId:id('Operating Checking'),creditCents:cents(2400)}],'VENDOR_DEPOSIT','ABC Trailer & Equipment','ABC-TRAILER-0617','Balance-sheet deposit toward enclosed trailer');
