@@ -91,16 +91,16 @@ const freezeAttempt = (value: SuncoastInteractionAttempt): SuncoastInteractionAt
 
 export function recognizeInteractionIntent(content: string): InteractionIntent {
   const normalized = content.toLowerCase();
-  const requestsDocument = /send|provide|need|request|have|share|get/.test(normalized) && /receipt|invoice|agreement|document|report|support|paperwork/.test(normalized);
-  if (/abc|trailer/.test(normalized) && requestsDocument) return 'ABC_DOCUMENT_REQUEST';
-  if (/abc|trailer/.test(normalized) && /what|why|purpose|for/.test(normalized)) return 'ABC_PURPOSE';
-  if (/payroll|june 1.?14|june 14/.test(normalized) && requestsDocument) return 'PAYROLL_DOCUMENT_REQUEST';
-  if (/jenkins|1,?425/.test(normalized) && /owe|paid|collect|invoice|status/.test(normalized)) return 'JENKINS_STATUS';
-  if (/750|unapplied|future job|advance/.test(normalized)) return 'UNAPPLIED_DISPOSITION';
-  if (/286\.43|june 24/.test(normalized) || (/visa|card/.test(normalized) && /personal/.test(normalized))) return 'PERSONAL_CARD';
-  if (/tax|deduct|write.?off|tax return|tax advice/.test(normalized)) return 'TAX_BOUNDARY';
-  if (/cpa|historical|prior.year|journal entry/.test(normalized)) return 'CPA_ENTRY';
-  if (/what was|what is|don't recognize|do not recognize|unknown|unclear/.test(normalized) && /charge|transaction|payment/.test(normalized)) return 'AMBIGUOUS_TRANSACTION';
+  const requestsDocument = /\b(send|provide|need|request|have|share|get)\b/.test(normalized) && /\b(receipt|invoice|agreement|document|report|support|paperwork)\b/.test(normalized);
+  if (/\b(abc|trailer)\b/.test(normalized) && requestsDocument) return 'ABC_DOCUMENT_REQUEST';
+  if (/\b(abc|trailer)\b/.test(normalized) && /\b(what|why|purpose|for)\b/.test(normalized)) return 'ABC_PURPOSE';
+  if (/\bpayroll\b|june 1.?14|june 14/.test(normalized) && requestsDocument) return 'PAYROLL_DOCUMENT_REQUEST';
+  if (/\bjenkins\b|1,?425/.test(normalized) && /\b(owe|paid|collect|invoice|status)\b/.test(normalized)) return 'JENKINS_STATUS';
+  if (/\b750\b|\bunapplied\b|\bfuture job\b|\badvance\b/.test(normalized)) return 'UNAPPLIED_DISPOSITION';
+  if (/286\.43|june 24/.test(normalized) || (/\b(visa|card)\b/.test(normalized) && /\bpersonal\b/.test(normalized))) return 'PERSONAL_CARD';
+  if (/\b(tax|deduct|write.?off)\b|\btax return\b|\btax advice\b/.test(normalized)) return 'TAX_BOUNDARY';
+  if (/\b(cpa|historical)\b|\bprior.year\b|\bjournal entry\b/.test(normalized)) return 'CPA_ENTRY';
+  if (/\bwhat was\b|\bwhat is\b|\bdon't recognize\b|\bdo not recognize\b|\bunknown\b|\bunclear\b/.test(normalized) && /\b(charge|transaction|payment)\b/.test(normalized)) return 'AMBIGUOUS_TRANSACTION';
   return 'UNSUPPORTED';
 }
 
@@ -152,7 +152,7 @@ export function interactionStudentView(value: SuncoastInteractionAttempt) {
 }
 
 export function sendStudentMessage(value: SuncoastInteractionAttempt, conversationId: string, content: string): SuncoastInteractionAttempt {
-  if (content.length === 0 || content.length > 4000) throw new InvalidReferenceError('Message content is invalid');
+  if (content.trim().length === 0 || content.length > 4000) throw new InvalidReferenceError('Message content is invalid');
   const intent = recognizeInteractionIntent(content);
   let result = addMessage(value, conversationId, 'STUDENT', content);
   let next = appendAudit(result.value, { kind: 'STUDENT_MESSAGE', conversationId, messageId: result.message.id });
