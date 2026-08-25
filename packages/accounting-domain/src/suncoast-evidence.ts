@@ -25,7 +25,7 @@ const visaStatements=Object.freeze([
 ]);
 
 const fact=(label:string,value:string|number):EvidenceFact=>({label,value});
-const freezeDocument=(document:InstructorEvidenceDocument):InstructorEvidenceDocument=>Object.freeze({...document,facts:Object.freeze([...document.facts]),links:Object.freeze([...document.links])});
+const freezeDocument=(document:InstructorEvidenceDocument):InstructorEvidenceDocument=>Object.freeze({...document,facts:Object.freeze(document.facts.map(value=>Object.freeze({...value}))),links:Object.freeze(document.links.map(value=>Object.freeze({...value})))});
 const findEntry=(state:OperationalAttempt,predicate:(description:string,kind:string|undefined,date:string)=>boolean)=>{const entry=state.attempt.entries.find(item=>predicate(item.description,item.source?.kind,item.occurredOn));if(!entry)throw new Error('Authoritative evidence link unavailable');return entry.id};
 const invoice=(state:OperationalAttempt,number:string)=>{const value=state.invoices.find(item=>item.number===number);if(!value)throw new Error(`Invoice ${number} unavailable`);return value};
 const payment=(state:OperationalAttempt,reference:string)=>{const value=state.payments.find(item=>item.reference===reference);if(!value)throw new Error(`Payment ${reference} unavailable`);return value};
@@ -60,12 +60,12 @@ function canonicalDocuments(p002:P002InstructorState):readonly InstructorEvidenc
     {id:'instructor-case-memo',type:'INSTRUCTOR_MEMO',title:'Suncoast Lab 1 Instructor Evidence Map',date:'2026-07-01',issuer:'Practice Lab',state:'INSTRUCTOR_ONLY',facts:[fact('Scope','Protected evidence interpretations and scenario mapping')],links:[],interpretation:'Instructor-only control document.'},
   ];return Object.freeze(documents.map(freezeDocument));}
 
-const unlockRules:readonly UnlockRule[]=Object.freeze([
+const unlockRules:readonly UnlockRule[]=Object.freeze(([
   {documentId:'payroll-report-june-14',authorization:'DOCUMENT_REQUESTED',requestSubject:'payroll support'},
   {documentId:'abc-deposit-agreement',authorization:'DOCUMENT_REQUESTED',requestSubject:'ABC transaction support'},
   {documentId:'card-clarification-0624',authorization:'CLIENT_CLARIFICATION_COMPLETED',requestSubject:'June 24 card activity'},
-]);
-const addAudit=(value:SuncoastEvidenceAttempt,event:Omit<EvidenceAuditEvent,'sequence'|'at'>):SuncoastEvidenceAttempt=>{const next=Object.freeze({sequence:value.audit.length+1,at:`2026-07-03T09:${String(value.audit.length).padStart(2,'0')}:00.000Z`,...event});return{...value,audit:Object.freeze([...value.audit,next])}};
+] satisfies UnlockRule[]).map(value=>Object.freeze(value)));
+const addAudit=(value:SuncoastEvidenceAttempt,event:Omit<EvidenceAuditEvent,'sequence'|'at'>):SuncoastEvidenceAttempt=>{const next=Object.freeze({sequence:value.audit.length+1,at:`2026-07-03T09:${String(value.audit.length).padStart(2,'0')}:00.000Z`,...event});return Object.freeze({...value,audit:Object.freeze([...value.audit,next])})};
 
 export async function deriveSuncoastEvidence(studentId:string,attemptId:string,generation=1):Promise<SuncoastEvidenceAttempt>{const p002=await deriveP002StudentStart(studentId,attemptId,generation);return Object.freeze({attemptId,studentId,generation,documents:canonicalDocuments(p002),audit:Object.freeze([]),unlockRules,p002})}
 export function evidenceStudentView(value:SuncoastEvidenceAttempt){const documents=value.documents.filter(document=>document.state==='AVAILABLE_AT_START'||document.state==='UNLOCKED').map(document=>({id:document.id,type:document.type,title:document.title,date:document.date,issuer:document.issuer,facts:document.facts,links:document.links,state:document.state}));return{attemptId:value.attemptId,generation:value.generation,documents,audit:value.audit.map(event=>({sequence:event.sequence,at:event.at,kind:event.kind,documentId:event.documentId,referenceId:event.referenceId}))}}
