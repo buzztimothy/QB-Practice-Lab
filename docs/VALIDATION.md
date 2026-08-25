@@ -66,3 +66,15 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 - All 102 P-003, P-002, P-001A, P-001, P-000A, P-000, API/security, and PostgreSQL integration tests passed after final-review deep-immutability coverage was added.
 - P-003 coverage proves the exact Day 1 inventory, independent checking/card statement truth, attempt-owned evidence references, source distinctions, protected payroll/ABC/personal-card unlock flows, fail-closed hidden-document access, append-only audit history, cross-attempt isolation, reset relocking, clean-master preservation, and unchanged P-002 financial state.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-004 validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
+
+- Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes.
+- Prisma validation and generation passed; both migrations deployed and status reported current.
+- All 121 P-004, P-003, P-002, P-001A, P-001, P-000A, P-000, conversation/adversarial, API/security, and PostgreSQL integration tests passed after final-review manipulation and repeated-question coverage was added.
+- P-004 coverage proves INT-01 through INT-10, exact student-authored history, bounded intent recognition, authorized disclosure, safe unsupported behavior, allowlisted evidence unlocks, private deterministic client triggers, append-only audit, server-side ownership, cross-attempt rejection, reset, instructor secrecy, and unchanged accounting/evidence state.
+- Integration review removed an answer-key leak from the P-003 personal-card clarification: the document retains the authoritative personal-purpose fact but no longer tells the student to use `Owner Draws`.
+- Final review replaced unbounded intent substrings with bounded patterns after proving that `for` inside a word such as `information` could misauthorize an ABC purpose disclosure.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
