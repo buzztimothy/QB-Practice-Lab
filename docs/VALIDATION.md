@@ -47,3 +47,13 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-24:
 - All 65 P-001A, P-001, P-000A, P-000, API/security, and PostgreSQL integration tests passed. P-001A coverage proves component identities, balanced payroll journals, exact provider withdrawals, intentional zero ending payroll liability, updated June cash/accrual statements and June 30 Balance Sheet, independent zero-difference checking reconciliation, absence of duplicate expense or plugs, and protection of structured payroll answers from student-facing operational/document serialization.
 - Lint, typecheck, production build, and `git diff --check` passed.
 - Compiled API and web smoke checks passed.
+
+## P-002 validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
+
+- Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without changing the lockfile.
+- Prisma validation and generation passed; both migrations deployed and status reported current.
+- All 94 P-002, P-001A, P-001, P-000A, P-000, scenario/adversarial, API/security, and PostgreSQL integration tests passed.
+- P-002 coverage includes all twenty controls, protected transformation provenance, natural financial/reconciliation consequences, critical-evidence hooks without scoring, adversarial serialization, deterministic derivation, reset/history preservation, attempt isolation, and clean resolution without plugs.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
