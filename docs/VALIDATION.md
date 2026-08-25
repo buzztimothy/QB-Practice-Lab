@@ -89,3 +89,14 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 - P-005 coverage proves student-requested sent-message and unsent-draft help, selective and reflection modes, COACH-01 through COACH-08, four non-numeric communication dimensions, all three help levels, exact original/follow-up preservation, hidden-answer resistance, Michael/coaching separation, immutable audit, ownership isolation, reset, and absence of final scoring.
 - Final review corrected short-request bias, unsupported-certainty observations, and unnecessary improvement advice on already-strong communication.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-006 validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
+
+- Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes.
+- Prisma validation and generation passed; both migrations deployed and status reported current.
+- All 163 P-006, P-005, P-004, P-003, P-002, P-001A, P-001, P-000A, P-000, assessment/adversarial, API/security, and PostgreSQL integration tests passed after final-review fairness corrections.
+- P-006 coverage proves immutable evidence before score, rubric versioning, four supported competency evaluations, Month-End `NOT_ASSESSED`, nuanced help/independence, chronological self-correction, legitimate unchanged controls, source-backed critical states and overrides, bounded close attempts, resolved accounting comparison, threshold overrides, deterministic reassessment/snapshot preservation, student secrecy, ownership isolation, and reset lifecycle separation.
+- Final review prevented generic accounting mutations from being inferred correct, prevented post-message coaching from retroactively changing independence, rejected framework-keyword communication gaming, distinguished five self-correction/help outcomes, required investigation evidence before close readiness, and exposed assessed points separately from the 100-point rubric total.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
