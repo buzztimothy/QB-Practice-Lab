@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NotFoundError } from '../packages/accounting-domain/src/errors.js';
-import { deriveSuncoastCoaching, type SuncoastCoachingAttempt } from '../packages/accounting-domain/src/suncoast-coaching.js';
-import { buildResolvedP002State } from '../packages/accounting-domain/src/suncoast-student-start.js';
+import { deriveSuncoastCoaching, requestCommunicationCoaching, sendMessageWithCoaching, type SuncoastCoachingAttempt } from '../packages/accounting-domain/src/suncoast-coaching.js';
+import { buildResolvedP002State, recordP002Action } from '../packages/accounting-domain/src/suncoast-student-start.js';
 import {
   LAB1_READINESS_RUBRIC,
   SuncoastAssessmentService,
@@ -69,12 +69,47 @@ describe('P-006 assessment evidence and scoring', () => {
     expect(walkthrough.snapshots[0].competencies[0].earnedPoints).toBeGreaterThan(0);
   });
 
+  it('does not retroactively mark already-completed communication as helped', async () => {
+    let coaching = await deriveSuncoastCoaching('student-a', 'help-after');
+    const conversationId = coaching.interaction.conversations[0].id;
+    coaching = sendMessageWithCoaching(coaching, conversationId, 'Please provide the ABC receipt.');
+    const messageId = coaching.interaction.conversations[0].messages.find(message => message.sender === 'STUDENT')!.id;
+    coaching = requestCommunicationCoaching(coaching, messageId, 'WALKTHROUGH');
+    const value = deriveSuncoastAssessment(coaching);
+    expect(value.evidence.find(item => item.type === 'CLIENT_COMMUNICATION' && item.outcome !== 'OBSERVED')).toBeUndefined();
+    expect(value.evidence.find(item => item.type === 'COACHING_USAGE')).toMatchObject({ outcome: 'OBSERVED', helpState: 'WALKTHROUGH_USED' });
+  });
+
+  it('does not reward framework-shaped keywords without substantive task context', async () => {
+    let coaching = await deriveSuncoastCoaching('student-a', 'keyword-game');
+    const conversationId = coaching.interaction.conversations[0].id;
+    coaching = sendMessageWithCoaching(coaching, conversationId, 'I found it. It matters. I need it. Next.');
+    const gamed = deriveSuncoastAssessment(coaching);
+    expect(gamed.evidence.some(item => item.type === 'CLIENT_COMMUNICATION' && item.outcome === 'CORRECT')).toBe(false);
+    let substantive = await deriveSuncoastCoaching('student-a', 'substantive');
+    substantive = sendMessageWithCoaching(substantive, substantive.interaction.conversations[0].id, 'I reviewed the ABC transaction and need the supporting receipt before I classify it. Please send the document next.');
+    expect(deriveSuncoastAssessment(substantive).evidence).toContainEqual(expect.objectContaining({ type: 'CLIENT_COMMUNICATION', outcome: 'CORRECT', helpState: 'INDEPENDENT' }));
+  });
+
   it('uses later evidence while preserving the initial mistake and self-correction chronology', async () => {
     let value = add(await blank(), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'INCORRECT', { resolved: false });
     value = add(value, 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'CORRECT', { selfCorrected: true });
     expect(value.evidence).toHaveLength(2);
     expect(value.evidence.map(item => item.selfCorrected)).toEqual([false, true]);
     expect(evaluateAssessment(value, incomplete).snapshots[0].competencies[0].earnedPoints).toBeGreaterThan(0);
+  });
+
+  it('distinguishes correct-first, independent correction, helped correction, walkthrough correction, and unresolved error', async () => {
+    const score = (value: SuncoastAssessmentAttempt) => evaluateAssessment(value, incomplete).snapshots[0].competencies[0].earnedPoints!;
+    const correctFirst = score(add(await blank('pattern-a'), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04'));
+    const independentCorrection = score(add(add(await blank('pattern-b'), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'INCORRECT', { resolved: false }), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'CORRECT', { selfCorrected: true }));
+    const hintedCorrection = score(add(add(await blank('pattern-c'), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'INCORRECT', { resolved: false }), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'CORRECT', { selfCorrected: true, helpLevel: 'HINT' }));
+    const walkthroughCorrection = score(add(add(await blank('pattern-d'), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'INCORRECT', { resolved: false }), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'CORRECT', { selfCorrected: true, helpLevel: 'WALKTHROUGH' }));
+    const unresolved = score(add(await blank('pattern-e'), 'TECHNICAL_BOOKKEEPING', 'SUN-L1-04', 'INCORRECT', { resolved: false }));
+    expect(correctFirst).toBeGreaterThan(independentCorrection);
+    expect(independentCorrection).toBeGreaterThan(hintedCorrection);
+    expect(hintedCorrection).toBeGreaterThan(walkthroughCorrection);
+    expect(walkthroughCorrection).toBeGreaterThan(unresolved);
   });
 
   it('detects repeated help dependence and can cap a numerically strong readiness candidate', async () => {
@@ -106,9 +141,20 @@ describe('P-006 assessment evidence and scoring', () => {
   it('records immutable close evidence and bounded close results without hidden counts', async () => {
     let value = recordCloseAttempt(await blank(), { accountingCompletion: incomplete, unresolvedMaterialEvidenceRequests: true });
     value = recordCloseAttempt(value, { accountingCompletion: complete, unresolvedMaterialEvidenceRequests: false });
-    expect(value.closeAttempts.map(item => item.result)).toEqual(['NOT_READY', 'READY_FOR_FINAL_REVIEW']);
+    expect(value.closeAttempts.map(item => item.result)).toEqual(['NOT_READY', 'NOT_READY']);
     expect(value.evidence.map(item => item.type)).toEqual(['FINAL_ACCOUNTING_STATE', 'FINAL_ACCOUNTING_STATE']);
-    expect(assessmentStudentView(value).closeAttempts).toEqual([{ sequence: 1, at: value.closeAttempts[0].at, result: 'NOT_READY' }, { sequence: 2, at: value.closeAttempts[1].at, result: 'READY_FOR_FINAL_REVIEW' }]);
+    expect(assessmentStudentView(value).closeAttempts).toEqual([{ sequence: 1, at: value.closeAttempts[0].at, result: 'NOT_READY' }, { sequence: 2, at: value.closeAttempts[1].at, result: 'NOT_READY' }]);
+    const investigated = recordCloseAttempt(addSuccessfulControls(await blank('investigated')), { accountingCompletion: complete, unresolvedMaterialEvidenceRequests: false });
+    expect(investigated.closeAttempts[0].result).toBe('READY_FOR_FINAL_REVIEW');
+  });
+
+  it('does not infer correctness from a generic accounting mutation or correct final balances alone', async () => {
+    const coaching = await deriveSuncoastCoaching('student-a', 'unsafe-copy');
+    const target = coaching.interaction.evidence.p002.provenance.find(item => item.scenarioId === 'SUN-L1-04')!.studentRecordIds[0];
+    const p002 = recordP002Action(coaching.interaction.evidence.p002, 'ACCOUNT_CHANGED', target);
+    const derived = deriveSuncoastAssessment({ ...coaching, interaction: { ...coaching.interaction, evidence: { ...coaching.interaction.evidence, p002 } } });
+    expect(derived.evidence[0]).toMatchObject({ scenarioId: 'SUN-L1-04', outcome: 'OBSERVED', resolved: false });
+    expect(evaluateAssessment(derived, complete).snapshots[0].competencies[0].earnedPoints).toBe(0);
   });
 
   it('compares all required accounting surfaces and accepts intentional resolved-state differences', async () => {
@@ -144,6 +190,7 @@ describe('P-006 secrecy, ownership and reset', () => {
     const serialized = JSON.stringify(assessmentStudentView(value));
     expect(serialized).not.toMatch(/SUN-L1|CPA_HISTORY|instructor|sourceEvidence|critical|unresolvedAccounting|evidenceIds|helpDependent/i);
     expect(JSON.stringify(authorizedAssessmentView(value))).toContain('CPA_HISTORY_ALTERED');
+    expect(assessmentStudentView(value).assessment).toMatchObject({ pointsAssessed: 90, totalRubricPoints: 100, incomplete: true });
   });
 
   it('rejects cross-attempt evidence references', async () => {

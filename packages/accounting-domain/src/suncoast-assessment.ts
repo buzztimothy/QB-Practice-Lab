@@ -4,7 +4,7 @@ import { buildResolvedP002State } from './suncoast-student-start.js';
 import type { HelpLevel, SuncoastCoachingAttempt } from './suncoast-coaching.js';
 
 export const LAB1_READINESS_RUBRIC = 'LAB1_READINESS_V1' as const;
-export type RubricVersion = typeof LAB1_READINESS_RUBRIC;
+export type RubricVersion = string;
 export type Competency = 'TECHNICAL_BOOKKEEPING' | 'INVESTIGATION_PROBLEM_SOLVING' | 'PROFESSIONAL_JUDGMENT' | 'CLIENT_COMMUNICATION' | 'MONTH_END_FINANCIAL_EXPLANATION';
 export type AssessmentStatus = 'ASSESSED' | 'NOT_ASSESSED';
 export type HelpState = 'INDEPENDENT' | 'HINT_USED' | 'DIRECTION_USED' | 'WALKTHROUGH_USED';
@@ -21,6 +21,7 @@ export const competencyWeights: Readonly<Record<Competency, number>> = Object.fr
   CLIENT_COMMUNICATION: 15,
   MONTH_END_FINANCIAL_EXPLANATION: 10,
 });
+export const totalRubricPoints = Object.values(competencyWeights).reduce((sum, points) => sum + points, 0);
 
 export interface AssessmentEvidence {
   readonly id: string;
@@ -90,9 +91,13 @@ const baseAttempt = (studentId: string, attemptId: string, generation: number): 
 export function deriveSuncoastAssessment(coaching: SuncoastCoachingAttempt): SuncoastAssessmentAttempt {
   let result = baseAttempt(coaching.studentId, coaching.attemptId, coaching.generation);
   for (const event of coaching.interaction.evidence.p002.attempt.auditTrail) {
-    const scenarioId = event.hook ? coaching.interaction.evidence.p002.criticalHooks[event.hook] : undefined;
+    const provenance = coaching.interaction.evidence.p002.provenance.find(item => [...item.cleanRecordIds, ...item.studentRecordIds].includes(event.targetId));
+    const scenarioId = event.hook ? coaching.interaction.evidence.p002.criticalHooks[event.hook] : provenance?.scenarioId;
     const rule = scenarioId ? scenarioRules[scenarioId] : undefined;
-    result = appendAssessmentEvidence(result, { competency: rule?.competency ?? (event.action.includes('RECONCILIATION') ? 'INVESTIGATION_PROBLEM_SOLVING' : 'TECHNICAL_BOOKKEEPING'), type: event.action.includes('RECONCILIATION') ? 'RECONCILIATION' : event.selfCorrected ? 'SELF_CORRECTION' : 'ACCOUNTING_ACTION', source: { kind: 'P002_ACTION', id: `${event.sequence}:${event.targetId}`, attemptId: coaching.attemptId }, scenarioId: scenarioId as `SUN-L1-${string}` | undefined, criticalHook: event.hook, severity: event.hook ? 'CRITICAL' : 'ROUTINE', outcome: event.hook ? 'INAPPROPRIATE' : 'CORRECT', selfCorrected: event.selfCorrected ?? false, resolved: event.selfCorrected ?? !event.hook, instructorExplanation: event.hook ? `Critical action hook ${event.hook}.` : 'Recorded student bookkeeping action.' });
+    const verifiedCorrect = event.action === 'TRANSACTION_CORRECTED' || event.action === 'ACCOUNT_CONSOLIDATED' || event.action === 'SELF_CORRECTION' || event.selfCorrected === true;
+    const supportedEscalation = event.action === 'ISSUE_FLAGGED';
+    const outcome: EvidenceOutcome = event.hook ? 'INAPPROPRIATE' : verifiedCorrect ? 'CORRECT' : supportedEscalation ? 'ESCALATED_FOR_EVIDENCE' : 'OBSERVED';
+    result = appendAssessmentEvidence(result, { competency: rule?.competency ?? (event.action.includes('RECONCILIATION') ? 'INVESTIGATION_PROBLEM_SOLVING' : 'TECHNICAL_BOOKKEEPING'), type: event.action.includes('RECONCILIATION') ? 'RECONCILIATION' : event.selfCorrected ? 'SELF_CORRECTION' : 'ACCOUNTING_ACTION', source: { kind: 'P002_ACTION', id: `${event.sequence}:${event.targetId}`, attemptId: coaching.attemptId }, scenarioId: scenarioId as `SUN-L1-${string}` | undefined, criticalHook: event.hook, severity: event.hook ? 'CRITICAL' : 'ROUTINE', outcome, selfCorrected: event.selfCorrected ?? false, resolved: event.hook ? event.selfCorrected ?? false : verifiedCorrect || supportedEscalation, instructorExplanation: event.hook ? `Critical action hook ${event.hook}.` : `Recorded student bookkeeping action: ${event.action}; correctness is ${verifiedCorrect ? 'verified by the action contract' : 'not inferred'}.` });
   }
   for (const conversation of coaching.interaction.conversations) for (const message of conversation.messages.filter(item => item.sender === 'STUDENT')) {
     result = appendAssessmentEvidence(result, { competency: 'CLIENT_COMMUNICATION', type: 'CLIENT_COMMUNICATION', source: { kind: 'CONVERSATION_MESSAGE', id: message.id, attemptId: coaching.attemptId }, severity: 'ROUTINE', outcome: 'OBSERVED', selfCorrected: false, resolved: true, instructorExplanation: 'Student communication preserved for observable-behavior review; no competence inferred without an observation.' });
@@ -102,7 +107,12 @@ export function deriveSuncoastAssessment(coaching: SuncoastCoachingAttempt): Sun
   }
   for (const record of coaching.records) {
     const positive = Object.values(record.dimensions).filter(value => value === 'STRENGTH').length;
-    result = appendAssessmentEvidence(result, { competency: 'CLIENT_COMMUNICATION', type: 'CLIENT_COMMUNICATION', source: { kind: 'COACHING_RECORD', id: record.id, attemptId: coaching.attemptId }, severity: 'ROUTINE', outcome: positive >= 3 ? 'CORRECT' : 'INCORRECT', helpLevel: record.helpLevel, selfCorrected: false, resolved: positive >= 3, instructorExplanation: `Observable communication dimensions: ${positive}/4 strengths; ${record.situation}.` });
+    const message = coaching.interaction.conversations.flatMap(conversation => conversation.messages).find(item => item.id === record.studentMessageId);
+    const concreteContext = /\b(transaction|receipt|invoice|agreement|report|document(?:ation)?|support|abc|payroll|cpa|statement|p&l|home depot|jenkins|palm breeze|reconcil)/i.test(message?.content ?? '');
+    const positiveSituation = record.situation === 'COACH-05' || record.situation === 'COACH-08' && concreteContext;
+    const weaknessSituation = ['COACH-01', 'COACH-02', 'COACH-03', 'COACH-04', 'COACH-06', 'COACH-07'].includes(record.situation);
+    if (!record.originalDraft && (positiveSituation || weaknessSituation)) result = appendAssessmentEvidence(result, { competency: 'CLIENT_COMMUNICATION', type: 'CLIENT_COMMUNICATION', source: { kind: 'COACHING_OBSERVATION', id: record.id, attemptId: coaching.attemptId }, severity: 'ROUTINE', outcome: positiveSituation && positive >= 3 ? 'CORRECT' : 'INCORRECT', selfCorrected: false, resolved: positiveSituation && positive >= 3, instructorExplanation: `Situation-grounded communication observation on the already-sent message: ${positive}/4 dimensions; ${record.situation}; concrete task context ${concreteContext ? 'present' : 'absent'}. Later coaching does not retroactively change independence.` });
+    result = appendAssessmentEvidence(result, { competency: 'CLIENT_COMMUNICATION', type: 'COACHING_USAGE', source: { kind: 'COACHING_RECORD', id: record.id, attemptId: coaching.attemptId }, severity: 'ROUTINE', outcome: 'OBSERVED', helpLevel: record.helpLevel, selfCorrected: false, resolved: true, instructorExplanation: record.originalDraft ? 'Help was used on a draft before any student performance was observed.' : 'Help was requested or offered after the referenced student message.' });
   }
   return result;
 }
@@ -155,12 +165,13 @@ function competencyResult(competency: Competency, evidence: readonly AssessmentE
   const assessable = latest.filter(item => item.outcome !== 'OBSERVED');
   const positive = assessable.filter(item => ['CORRECT', 'LEGITIMATELY_UNCHANGED', 'ESCALATED_FOR_EVIDENCE'].includes(item.outcome) && item.resolved);
   const helpFactor = (item: AssessmentEvidence) => item.helpState === 'INDEPENDENT' ? 1 : item.helpState === 'HINT_USED' ? 0.9 : item.helpState === 'DIRECTION_USED' ? 0.75 : 0.55;
+  const performanceFactor = (item: AssessmentEvidence) => helpFactor(item) * (item.selfCorrected ? 0.8 : 1);
   let earnedPoints: number;
-  if (competency === 'CLIENT_COMMUNICATION') earnedPoints = assessable.length === 0 ? 0 : Math.round(availablePoints * positive.reduce((sum, item) => sum + helpFactor(item), 0) / assessable.length);
+  if (competency === 'CLIENT_COMMUNICATION') earnedPoints = assessable.length === 0 ? 0 : Math.round(availablePoints * positive.reduce((sum, item) => sum + performanceFactor(item), 0) / assessable.length);
   else {
     const applicable = Object.entries(scenarioRules).filter(([, rule]) => rule.competency === competency);
     const rawMax = applicable.reduce((sum, [, rule]) => sum + rule.points, 0);
-    const rawEarned = applicable.reduce((sum, [scenarioId, rule]) => { const item = latestByScenario.get(scenarioId); return sum + (item && positive.includes(item) ? rule.points * helpFactor(item) : 0); }, 0);
+    const rawEarned = applicable.reduce((sum, [scenarioId, rule]) => { const item = latestByScenario.get(scenarioId); return sum + (item && positive.includes(item) ? rule.points * performanceFactor(item) : 0); }, 0);
     earnedPoints = rawMax === 0 ? 0 : Math.round(availablePoints * rawEarned / rawMax);
   }
   return deepFreeze({ competency, status: 'ASSESSED', earnedPoints: Math.min(availablePoints, earnedPoints), availablePoints, evidenceIds: relevant.map(item => item.id), helpDependent: assessable.length > 0 && assessable.filter(item => item.helpState !== 'INDEPENDENT').length / assessable.length > 0.5 });
@@ -190,7 +201,10 @@ export function recordCloseAttempt(value: SuncoastAssessmentAttempt, input: { re
   const withEvidence = appendAssessmentEvidence(value, { competency: 'TECHNICAL_BOOKKEEPING', type: 'FINAL_ACCOUNTING_STATE', source: { kind: 'CLOSE_ATTEMPT', id: `${value.attemptId}-close-${value.closeAttempts.length + 1}`, attemptId: value.attemptId }, severity: 'MATERIAL', outcome: input.accountingCompletion.complete ? 'CORRECT' : 'INCORRECT', selfCorrected: false, resolved: input.accountingCompletion.complete, instructorExplanation: 'Accounting completion state captured at close attempt.' });
   const events = criticalEvents(withEvidence.evidence);
   const criticalState = events.find(item => item.state === 'TRIGGERED_UNRESOLVED')?.state ?? events.find(item => item.state !== 'NOT_TRIGGERED')?.state ?? 'NOT_TRIGGERED';
-  const result: CloseResult = criticalState === 'TRIGGERED_UNRESOLVED' ? 'BLOCKED' : input.accountingCompletion.complete && !input.unresolvedMaterialEvidenceRequests ? 'READY_FOR_FINAL_REVIEW' : 'NOT_READY';
+  const requiredInvestigations = Object.entries(scenarioRules).filter(([, rule]) => rule.investigationRequired).map(([scenarioId]) => scenarioId);
+  const investigated = new Set<string>(withEvidence.evidence.filter(item => item.scenarioId && item.resolved && ['CORRECT', 'LEGITIMATELY_UNCHANGED', 'ESCALATED_FOR_EVIDENCE'].includes(item.outcome)).map(item => item.scenarioId!));
+  const requiredInvestigationComplete = requiredInvestigations.every(scenarioId => investigated.has(scenarioId));
+  const result: CloseResult = criticalState === 'TRIGGERED_UNRESOLVED' ? 'BLOCKED' : input.accountingCompletion.complete && !input.unresolvedMaterialEvidenceRequests && requiredInvestigationComplete ? 'READY_FOR_FINAL_REVIEW' : 'NOT_READY';
   const sequence = withEvidence.closeAttempts.length + 1;
   const close: CloseAttempt = deepFreeze({ id: `${withEvidence.attemptId}-close-${sequence}`, attemptId: withEvidence.attemptId, sequence, at: at(withEvidence.evidence.length + sequence), unresolvedAccountingDifferences: !input.accountingCompletion.complete, unresolvedMaterialEvidenceRequests: input.unresolvedMaterialEvidenceRequests, reconciled: input.accountingCompletion.reconciled, criticalState, result });
   return deepFreeze({ ...withEvidence, closeAttempts: [...withEvidence.closeAttempts, close] });
@@ -198,7 +212,7 @@ export function recordCloseAttempt(value: SuncoastAssessmentAttempt, input: { re
 
 export function assessmentStudentView(value: SuncoastAssessmentAttempt) {
   const latest = value.snapshots.at(-1);
-  return deepFreeze({ attemptId: value.attemptId, generation: value.generation, rubricVersion: value.rubricVersion, assessment: latest ? { competencies: latest.competencies.map(item => ({ competency: item.competency, status: item.status, earnedPoints: item.earnedPoints, availablePoints: item.availablePoints })), pointsEarned: latest.pointsEarned, pointsAssessed: latest.pointsAssessed, classification: latest.classification, incomplete: latest.competencies.some(item => item.status === 'NOT_ASSESSED') } : null, closeAttempts: value.closeAttempts.map(item => ({ sequence: item.sequence, at: item.at, result: item.result })) });
+  return deepFreeze({ attemptId: value.attemptId, generation: value.generation, rubricVersion: value.rubricVersion, assessment: latest ? { competencies: latest.competencies.map(item => ({ competency: item.competency, status: item.status, earnedPoints: item.earnedPoints, availablePoints: item.availablePoints })), pointsEarned: latest.pointsEarned, pointsAssessed: latest.pointsAssessed, totalRubricPoints, classification: latest.classification, incomplete: latest.competencies.some(item => item.status === 'NOT_ASSESSED') } : null, closeAttempts: value.closeAttempts.map(item => ({ sequence: item.sequence, at: item.at, result: item.result })) });
 }
 export function authorizedAssessmentView(value: SuncoastAssessmentAttempt) { return value; }
 export function resetSuncoastAssessment(value: SuncoastAssessmentAttempt, newAttemptId: string): { old: SuncoastAssessmentAttempt; next: SuncoastAssessmentAttempt } { return { old: value, next: baseAttempt(value.studentId, newAttemptId, value.generation + 1) }; }
