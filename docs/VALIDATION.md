@@ -85,6 +85,7 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 
 - Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes.
 - Prisma validation and generation passed; both migrations deployed and status reported current.
-- All 140 P-005, P-004, P-003, P-002, P-001A, P-001, P-000A, P-000, coaching/adversarial, API/security, and PostgreSQL integration tests passed.
+- All 142 P-005, P-004, P-003, P-002, P-001A, P-001, P-000A, P-000, coaching/adversarial, API/security, and PostgreSQL integration tests passed after final-review help-escalation, cross-context, selective-frequency, and style-neutrality coverage was added.
 - P-005 coverage proves student-requested sent-message and unsent-draft help, selective and reflection modes, COACH-01 through COACH-08, four non-numeric communication dimensions, all three help levels, exact original/follow-up preservation, hidden-answer resistance, Michael/coaching separation, immutable audit, ownership isolation, reset, and absence of final scoring.
+- Final review corrected short-request bias, unsupported-certainty observations, and unnecessary improvement advice on already-strong communication.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.

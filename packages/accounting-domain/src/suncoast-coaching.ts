@@ -72,7 +72,7 @@ const rules: readonly CoachingRule[] = Object.freeze(([
   { situation: 'COACH-05', mode: 'REFLECTION', detect: (message, prior) => /write that whole pressure washer off/i.test(prior ?? '') && /\b(verify|confirm|check|cpa|tax professional|tax advice)\b/i.test(message) },
   { situation: 'COACH-06', mode: 'SELECTIVE_POST_INTERACTION', detect: (_message, prior) => /need the p&l for the bank today/i.test(prior ?? '') },
   { situation: 'COACH-07', mode: 'SELECTIVE_POST_INTERACTION', detect: (_message, prior) => /last bookkeeper never asked/i.test(prior ?? '') },
-  { situation: 'COACH-08', mode: 'REFLECTION', detect: message => /\b(found|reviewed|noticed)\b/i.test(message) && /\b(need|please|send|provide|confirm|next)\b/i.test(message) },
+  { situation: 'COACH-08', mode: 'REFLECTION', detect: message => /\b(found|reviewed|noticed)\b/i.test(message) && /\b(need|please|send|provide|confirm|next)\b/i.test(message) && !/\b(definitely|obviously|i know|must be|certainly|no doubt|will classify|put it in)\b/i.test(message) },
 ] satisfies CoachingRule[]).map(rule => Object.freeze(rule)));
 
 const coachAt = (sequence: number) => `2026-07-05T11:${String(sequence).padStart(2, '0')}:00.000Z`;
@@ -108,11 +108,15 @@ function contextSnapshot(value: SuncoastCoachingAttempt): AuthorizedContextSnaps
   };
 }
 function dimensionsFor(situation: CoachingSituation, message: string): Readonly<Record<CommunicationDimension, DimensionObservation>> {
-  const allStrength = situation === 'COACH-05' || situation === 'COACH-08';
-  const clear = allStrength || message.trim().split(/\s+/).length >= 4;
-  const confident = allStrength || !(/\bsorry\b/i.test(message) && /\b(probably|not sure|bother|missing)\b/i.test(message));
-  const accurate = allStrength || !['COACH-03', 'COACH-04', 'COACH-06', 'ANSWER_BOUNDARY'].includes(situation);
-  const actionable = allStrength || /\b(send|provide|confirm|check|verify|need|next)\b/i.test(message);
+  const professionalUncertainty = /\b(verify|confirm|check|supporting documentation|before i (classify|answer|change)|cpa|tax professional)\b/i.test(message);
+  const selfUndermining = /\bsorry\b/i.test(message) && /\b(probably|not sure|bother|missing)\b/i.test(message);
+  const unsupportedCertainty = /\b(definitely|obviously|i know|must be|certainly|no doubt|will classify|put it in)\b/i.test(message);
+  const allStrength = situation === 'COACH-08' || (situation === 'COACH-05' && !unsupportedCertainty);
+  const specificRequest = /\b(send|provide|need|get|request)\b.*\b(receipt|invoice|agreement|report|document|support)\b|\b(receipt|invoice|agreement|report|document|support)\b.*\b(please|needed|required)\b/i.test(message);
+  const clear = allStrength || message.trim().split(/\s+/).length >= 4 || specificRequest;
+  const confident = allStrength || (!unsupportedCertainty && (professionalUncertainty || !selfUndermining));
+  const accurate = allStrength || (!unsupportedCertainty && !['COACH-03', 'COACH-04', 'COACH-06', 'ANSWER_BOUNDARY'].includes(situation));
+  const actionable = allStrength || professionalUncertainty || specificRequest || /\b(send|provide|confirm|check|verify|need|next)\b/i.test(message);
   return Object.freeze({ CLEAR: clear ? 'STRENGTH' : 'FOCUS', CONFIDENT: confident ? 'STRENGTH' : 'FOCUS', ACCURATE: accurate ? 'STRENGTH' : 'FOCUS', ACTIONABLE: actionable ? 'STRENGTH' : 'FOCUS' });
 }
 function genericHelp(level: HelpLevel) {
@@ -129,7 +133,7 @@ function coachingContent(situation: CoachingSituation, level: HelpLevel) {
     'COACH-05': { worked: 'You appropriately declined to guess and identified the CPA as the right source for tax guidance.', strengthen: 'Keep the boundary concise and state the next step.', why: 'Professional confidence includes verifying matters outside your authority.' },
     'COACH-06': { worked: 'You responded to the client’s deadline.', strengthen: 'Acknowledge the timing, state that unresolved work prevents calling the statements final, and explain the immediate next step.', why: 'The client needs a realistic path forward without receiving unfinished reports as verified.' },
     'COACH-07': { worked: 'You stayed engaged despite the pushback.', strengthen: 'Explain calmly that documentation supports accurate books and state exactly what is still needed.', why: 'A non-defensive boundary protects both accuracy and client trust.' },
-    'COACH-08': { worked: 'Your message was clear, professional, fact-based, and gave Michael an actionable next step.', strengthen: 'Keep using this level of specificity where the issue requires it.', why: 'Clear next steps reduce delays and support accurate bookkeeping.' },
+    'COACH-08': { worked: 'Your message was clear, professional, fact-based, and gave Michael an actionable next step.', strengthen: 'No material change is needed for this interaction.', why: 'Clear next steps reduce delays and support accurate bookkeeping.' },
     ANSWER_BOUNDARY: { worked: 'You identified that you need help moving the investigation forward.', strengthen: 'BBB coaching will not supply an account or hidden answer. Use the available facts and identify what support or clarification is still needed.', why: 'The bookkeeping conclusion must remain grounded in evidence you have legitimately obtained.' },
     GENERAL: { worked: 'You identified a communication point worth improving.', strengthen: 'Use the BBB framework where useful: what you found, why it matters, what you need, and what happens next.', why: 'Clear, confident, accurate, and actionable communication helps the client respond without replacing your judgment.' },
   }[situation];
