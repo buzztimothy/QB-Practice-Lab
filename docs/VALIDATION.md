@@ -57,3 +57,12 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 - All 94 P-002, P-001A, P-001, P-000A, P-000, scenario/adversarial, API/security, and PostgreSQL integration tests passed.
 - P-002 coverage includes all twenty controls, protected transformation provenance, natural financial/reconciliation consequences, critical-evidence hooks without scoring, adversarial serialization, deterministic derivation, reset/history preservation, attempt isolation, and clean resolution without plugs.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-003 validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
+
+- Prisma schema validation and generation passed; both migrations deployed and status reported current.
+- All 102 P-003, P-002, P-001A, P-001, P-000A, P-000, API/security, and PostgreSQL integration tests passed after final-review deep-immutability coverage was added.
+- P-003 coverage proves the exact Day 1 inventory, independent checking/card statement truth, attempt-owned evidence references, source distinctions, protected payroll/ABC/personal-card unlock flows, fail-closed hidden-document access, append-only audit history, cross-attempt isolation, reset relocking, clean-master preservation, and unchanged P-002 financial state.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
