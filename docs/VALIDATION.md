@@ -100,3 +100,13 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 - P-006 coverage proves immutable evidence before score, rubric versioning, four supported competency evaluations, Month-End `NOT_ASSESSED`, nuanced help/independence, chronological self-correction, legitimate unchanged controls, source-backed critical states and overrides, bounded close attempts, resolved accounting comparison, threshold overrides, deterministic reassessment/snapshot preservation, student secrecy, ownership isolation, and reset lifecycle separation.
 - Final review prevented generic accounting mutations from being inferred correct, prevented post-message coaching from retroactively changing independence, rejected framework-keyword communication gaming, distinguished five self-correction/help outcomes, required investigation evidence before close readiness, and exposed assessed points separately from the 100-point rubric total.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-007 validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
+
+- Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes.
+- Prisma generation and validation passed; both migrations deployed and status reported current.
+- All 182 P-007, P-006, P-005, P-004, P-003, P-002, P-001A, P-001, P-000A, P-000, final-meeting/adversarial, API/security, and PostgreSQL integration tests passed across 13 files.
+- P-007 coverage proves close-gated entry, current-ledger completion revalidation, resolved financial-package truth, April–June trends, exact independent explanation preservation, 3/2/2/2/1 dimension weighting, concise and alternative strong explanations, keyword-gaming resistance, material-error and unsupported-causation handling, cash/profit distinction, deterministic bounded follow-ups, post-performance help chronology, 100-point P-006 reassessment with historical snapshots intact, overrides, secrecy, ownership isolation, and reset separation.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
