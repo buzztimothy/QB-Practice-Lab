@@ -118,6 +118,7 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 
 - Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes.
 - Prisma generation and validation passed; both migrations deployed and status reported current.
-- All 205 P-008 through P-000 unit, adversarial, API/security, and PostgreSQL integration tests passed across 14 files. The 17 database enforcement tests passed directly against PostgreSQL.
+- All 208 P-008 through P-000 unit, adversarial, API/security, and PostgreSQL integration tests passed across 14 files. The 17 database enforcement tests passed directly against PostgreSQL.
 - P-008 coverage proves all six canonical classifications and display labels, deterministic competency interpretations, authoritative point presentation, evidence-grounded strengths and development guidance, qualitative help and self-correction summaries, bounded critical-risk language, instructor-data secrecy, immutable/versioned reports, idempotent generation, retry separation, malformed-input rejection, and server-side ownership isolation.
+- Final review removed unsupported communication inferences, made help-dependence wording follow the authoritative competency result, distinguished coached from independent critical self-correction, represented all five P-007 explanation dimensions, bounded Client Ready as a Lab 1 recommendation rather than a credential or guarantee, and added fail-closed evidence/weight provenance validation.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.

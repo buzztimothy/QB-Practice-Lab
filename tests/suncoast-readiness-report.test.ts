@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidReferenceError, InvalidStateError, NotFoundError } from '../packages/accounting-domain/src/errors.js';
 import { competencyWeights, type AssessmentEvidence, type Competency, type ReadinessClassification, type SuncoastAssessmentAttempt } from '../packages/accounting-domain/src/suncoast-assessment.js';
+import type { ExplanationDimension, SuncoastMonthEndMeeting } from '../packages/accounting-domain/src/suncoast-month-end.js';
 import { ReadinessReportService, authorizedReadinessReportView, competencyLabel, generateReadinessReport, readinessReportStudentView } from '../packages/accounting-domain/src/suncoast-readiness-report.js';
 
 const competencies = Object.keys(competencyWeights) as Competency[];
 const complete = Object.freeze({ trialBalance: true, cashProfitAndLoss: true, accrualProfitAndLoss: true, balanceSheet: true, accountsReceivable: true, undepositedFunds: true, checking: true, visa: true, payrollLiabilities: true, reconciled: true, historicalIntegrity: true, complete: true });
+const dimensionWeights: Record<ExplanationDimension, number> = { FINANCIAL_ACCURACY: 3, RELEVANCE: 2, CLARITY: 2, BUSINESS_INSIGHT: 2, PROFESSIONAL_COMMUNICATION: 1 };
 
 function assessment(classification: ReadinessClassification = 'CLIENT_READY', options: { id?: string; studentId?: string; generation?: number; points?: readonly number[]; notAssessed?: Competency; helped?: Competency; selfCorrected?: boolean; critical?: 'TRIGGERED_UNRESOLVED' | 'TRIGGERED_SELF_CORRECTED' | 'TRIGGERED_AFTER_COACHING_CORRECTED' } = {}): SuncoastAssessmentAttempt {
   const attemptId = options.id ?? 'attempt-a', studentId = options.studentId ?? 'student-a';
@@ -19,6 +21,12 @@ function assessment(classification: ReadinessClassification = 'CLIENT_READY', op
   return Object.freeze({ attemptId, studentId, generation: options.generation ?? 1, rubricVersion: 'LAB1_READINESS_V1', evidence: Object.freeze(evidence), closeAttempts: [], snapshots: [Object.freeze({ id: `${attemptId}-snapshot-1`, attemptId, rubricVersion: 'LAB1_READINESS_V1', sequence: 1, evaluatedAt: '2026-07-08T14:30:00.000Z', evidenceThroughSequence: evidence.length, competencies: Object.freeze(results), pointsEarned, pointsAssessed, criticalEvents: Object.freeze(criticalEvents), accountingCompletion: complete, classification, requiresInstructorReview: classification === 'REQUIRES_REVIEW' })] });
 }
 
+function meeting(attemptId = 'attempt-a', studentId = 'student-a'): SuncoastMonthEndMeeting {
+  const financialPackage = { attemptId, period: '2026-06' as const, cashProfitAndLoss: { april: { revenueCents: 0, expenseCents: 0, netIncomeCents: 0 }, may: { revenueCents: 0, expenseCents: 0, netIncomeCents: 0 }, june: { revenueCents: 0, expenseCents: 0, netIncomeCents: 0 } }, comparisons: { juneVsMayRevenueChangeCents: 0, juneVsAprilRevenueChangeCents: 0, juneVsAprilRevenuePercentTenths: 0 }, balanceSheet: { assets: [], liabilities: [], equity: [], currentEarningsCents: 0, totalAssetsCents: 0, totalLiabilitiesAndEquityCents: 0 }, operatingCheckingCents: 0, receivables: [], liabilities: [] };
+  const dimensions = (Object.keys(dimensionWeights) as ExplanationDimension[]).map((dimension, index) => ({ dimension, earnedPoints: index === 0 ? dimensionWeights[dimension] : index === 1 ? 1 : 0, availablePoints: dimensionWeights[dimension], instructorRationale: `SECRET_DIMENSION_${dimension}` }));
+  return { id: `${attemptId}-meeting`, attemptId, studentId, generation: 1, status: 'ASSESSED', openingPrompt: 'Okay. How did we do this month?', financialPackage, explanationEvidence: { id: 'source-5', attemptId, meetingId: `${attemptId}-meeting`, explanation: 'student words', financialContext: financialPackage, followUps: [], helpState: 'INDEPENDENT', dimensions, points: 4, submittedAt: '2026-07-08T14:00:00.000Z', sequence: 1, rubricVersion: 'LAB1_READINESS_V1' }, helpAfterExplanation: [], audit: [] };
+}
+
 describe('P-008 client readiness report', () => {
   it.each([
     ['CLIENT_READY', 'Client Ready'], ['CLIENT_READY_WITH_SUPPORT', 'Client Ready With Support'], ['MORE_PRACTICE_NEEDED', 'More Practice Recommended'], ['RETURN_TO_LAB', 'Return to the Practice Lab'], ['INCOMPLETE', 'Assessment Incomplete'], ['REQUIRES_REVIEW', 'BBB Review Required'],
@@ -30,6 +38,7 @@ describe('P-008 client readiness report', () => {
   it('maps competency percentages deterministically and documents NOT_ASSESSED behavior in code', () => {
     const result = (earnedPoints: number | null, status: 'ASSESSED' | 'NOT_ASSESSED' = 'ASSESSED') => ({ competency: 'TECHNICAL_BOOKKEEPING' as const, status, earnedPoints, availablePoints: 40, evidenceIds: [], helpDependent: false });
     expect([competencyLabel(result(36)), competencyLabel(result(32)), competencyLabel(result(28)), competencyLabel(result(27)), competencyLabel(result(null, 'NOT_ASSESSED'))]).toEqual(['STRONG', 'PROFICIENT', 'DEVELOPING', 'NEEDS_PRACTICE', 'NOT_ASSESSED']);
+    expect([competencyLabel(result(35)), competencyLabel(result(31)), competencyLabel(result(27))]).toEqual(['PROFICIENT', 'DEVELOPING', 'NEEDS_PRACTICE']);
   });
 
   it('shows authoritative points and honest strengths/development without inventing accomplishments', () => {
@@ -49,7 +58,7 @@ describe('P-008 client readiness report', () => {
 
   it('describes help qualitatively, preserves self-correction nuance, and never exposes counts', () => {
     const view = readinessReportStudentView(generateReadinessReport(null, assessment('CLIENT_READY_WITH_SUPPORT', { helped: 'TECHNICAL_BOOKKEEPING', selfCorrected: true })));
-    expect(view.independenceSummary).toContain('walkthrough assistance');
+    expect(view.independenceSummary).toContain('walkthrough dependence');
     expect(view.selfCorrectionSummary).toContain('substantial assistance');
     expect(view.independenceSummary).not.toMatch(/\b\d+\b/);
   });
@@ -58,6 +67,32 @@ describe('P-008 client readiness report', () => {
     const view = readinessReportStudentView(generateReadinessReport(null, assessment(critical === 'TRIGGERED_UNRESOLVED' ? 'RETURN_TO_LAB' : 'REQUIRES_REVIEW', { critical })));
     expect(view.criticalSummary).toBeTruthy();
     expect(JSON.stringify(view)).not.toContain('SECRET_CRITICAL_HOOK');
+    if (critical === 'TRIGGERED_SELF_CORRECTED') expect(view.criticalSummary).toContain('own review');
+    if (critical === 'TRIGGERED_AFTER_COACHING_CORRECTED') expect(view.criticalSummary).toContain('after coaching');
+  });
+
+  it('keeps contradictory competency outcomes explicit without overriding the canonical result', () => {
+    const view = readinessReportStudentView(generateReadinessReport(null, assessment('CLIENT_READY_WITH_SUPPORT', { points: [40, 20, 15, 6, 10] })));
+    expect(view.header.canonicalClassification).toBe('CLIENT_READY_WITH_SUPPORT');
+    expect(view.competencies[0].label).toBe('STRONG');
+    expect(view.competencies[3].label).toBe('NEEDS_PRACTICE');
+    expect(view.communicationSummary).toContain('Needs Practice');
+  });
+
+  it('presents all five authoritative P-007 dimensions without exposing rationales or inventing insight', () => {
+    const view = readinessReportStudentView(generateReadinessReport(null, assessment('MORE_PRACTICE_NEEDED', { points: [40, 20, 15, 15, 4] }), meeting()));
+    expect(view.monthEndSummary).toContain('financial accuracy met');
+    expect(view.monthEndSummary).toContain('relevance is developing');
+    expect(view.monthEndSummary).toContain('clarity needs practice');
+    expect(view.monthEndSummary).toContain('business insight needs practice');
+    expect(view.monthEndSummary).toContain('professional communication needs practice');
+    expect(view.monthEndSummary).not.toContain('SECRET_DIMENSION');
+  });
+
+  it('frames Client Ready as a bounded Lab 1 recommendation, not a credential or guarantee', () => {
+    const next = readinessReportStudentView(generateReadinessReport(null, assessment())).recommendedNextStep;
+    expect(next).toContain('Based on the Lab 1 evidence');
+    expect(next).toContain('not a certification, license, or guarantee');
   });
 
   it('does not leak instructor explanations, source references, scenario solutions, or hidden grading metadata', () => {
@@ -91,6 +126,11 @@ describe('P-008 client readiness report', () => {
     const malformed = assessment();
     const bad = { ...malformed, snapshots: [{ ...malformed.snapshots[0], pointsEarned: 99 }] };
     expect(() => generateReadinessReport(null, bad)).toThrow(InvalidStateError);
+    const badReference = { ...malformed, snapshots: [{ ...malformed.snapshots[0], competencies: malformed.snapshots[0].competencies.map((item, index) => index === 0 ? { ...item, evidenceIds: ['missing-evidence'] } : item) }] };
+    expect(() => generateReadinessReport(null, badReference)).toThrow(InvalidReferenceError);
+    const wrongWeight = { ...malformed, snapshots: [{ ...malformed.snapshots[0], competencies: malformed.snapshots[0].competencies.map((item, index) => index === 0 ? { ...item, availablePoints: 39, earnedPoints: 39 } : index === 1 ? { ...item, availablePoints: 21, earnedPoints: 21 } : item) }] };
+    expect(() => generateReadinessReport(null, wrongWeight)).toThrow(InvalidStateError);
+    expect(() => generateReadinessReport(null, malformed, meeting('attempt-b'))).toThrow(InvalidReferenceError);
   });
 
   it('enforces student ownership in the report service without exposing existence', async () => {
