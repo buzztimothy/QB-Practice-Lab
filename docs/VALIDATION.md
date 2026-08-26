@@ -111,3 +111,13 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 - P-007 coverage proves close-gated entry, current-ledger completion revalidation, resolved financial-package truth, April–June trends, exact independent explanation preservation, 3/2/2/2/1 dimension weighting, concise and alternative strong explanations, keyword-gaming resistance, material-error and unsupported-causation handling, cash/profit distinction, deterministic bounded follow-ups, post-performance help chronology, 100-point P-006 reassessment with historical snapshots intact, overrides, secrecy, ownership isolation, and reset separation.
 - Final review added post-close P-002 activity invalidation, rounded 28% and minor-rounding fairness, follow-up professional-boundary assessment, explicit critical-override regression, and complete append-only meeting/assessment audit coverage with private trigger events removed from the student projection.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-008 validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
+
+- Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes.
+- Prisma generation and validation passed; both migrations deployed and status reported current.
+- All 205 P-008 through P-000 unit, adversarial, API/security, and PostgreSQL integration tests passed across 14 files. The 17 database enforcement tests passed directly against PostgreSQL.
+- P-008 coverage proves all six canonical classifications and display labels, deterministic competency interpretations, authoritative point presentation, evidence-grounded strengths and development guidance, qualitative help and self-correction summaries, bounded critical-risk language, instructor-data secrecy, immutable/versioned reports, idempotent generation, retry separation, malformed-input rejection, and server-side ownership isolation.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
