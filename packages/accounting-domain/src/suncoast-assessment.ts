@@ -39,6 +39,7 @@ export interface AssessmentEvidence {
   readonly sequence: number;
   readonly at: string;
   readonly instructorExplanation: string;
+  readonly awardedPoints?: number;
 }
 
 export interface AccountingCompletion {
@@ -159,6 +160,10 @@ function competencyResult(competency: Competency, evidence: readonly AssessmentE
   const relevant = evidence.filter(item => item.competency === competency);
   const availablePoints = competencyWeights[competency];
   if (competency === 'MONTH_END_FINANCIAL_EXPLANATION' && !relevant.some(item => item.type === 'MONTH_END_EXPLANATION')) return deepFreeze({ competency, status: 'NOT_ASSESSED', earnedPoints: null, availablePoints, evidenceIds: [], helpDependent: false });
+  if (competency === 'MONTH_END_FINANCIAL_EXPLANATION') {
+    const authoritative = relevant.filter(item => item.type === 'MONTH_END_EXPLANATION').at(-1)!;
+    return deepFreeze({ competency, status: 'ASSESSED', earnedPoints: Math.max(0, Math.min(availablePoints, authoritative.awardedPoints ?? 0)), availablePoints, evidenceIds: relevant.map(item => item.id), helpDependent: authoritative.helpState !== 'INDEPENDENT' });
+  }
   const latestByScenario = new Map<string, AssessmentEvidence>();
   for (const item of relevant) latestByScenario.set(item.scenarioId ?? item.id, item);
   const latest = [...latestByScenario.values()];
