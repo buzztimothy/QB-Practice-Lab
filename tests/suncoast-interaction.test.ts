@@ -74,6 +74,15 @@ describe('P-004 Suncoast client interaction and communication foundation', () =>
     expect(JSON.stringify(interactionStudentView(value))).not.toMatch(/Owner Draws|authorized bookkeeping treatment/i);
   });
 
+  it('keeps a generic dated Visa question ambiguous until the student asks for purpose', async () => {
+    let value = await deriveSuncoastInteraction('student-a', 'attempt-a');
+    value = sendStudentMessage(value, conversationId(value), 'What was the June 24 Visa activity?');
+    expect(clientReply(value)).not.toMatch(/286\.43|personal/i);
+    expect(JSON.stringify(interactionStudentView(value))).not.toMatch(/card-clarification-0624|Owner Draws/);
+    value = sendStudentMessage(value, conversationId(value), 'Was the June 24 $286.43 Visa charge personal or for Suncoast work?');
+    expect(clientReply(value)).toBe('That $286.43 charge was personal. It was not for Suncoast work.');
+  });
+
   it('INT-06 keeps Michael inside his CPA knowledge boundary even when asked to authorize a change', async () => {
     let value = await deriveSuncoastInteraction('student-a', 'attempt-a');
     value = sendStudentMessage(value, conversationId(value), 'The historical CPA journal entry looks odd. Do you authorize me to fix or delete it?');

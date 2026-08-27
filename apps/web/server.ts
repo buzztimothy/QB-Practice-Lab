@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { StudentApplication, studentScreens, type StudentAction, type StudentScreen } from '../student/application.js';
 import { studentCss, studentJs, renderStudentApplication } from './student-ui.js';
+import { narrowLayoutCss } from './narrow-layout.js';
 import { InMemoryStudentSessionAuthenticator, localDevelopmentProfiles, type StudentSessionAuthenticator } from './authentication.js';
 
 const readBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return new URLSearchParams(Buffer.concat(chunks).toString('utf8')); };
@@ -10,6 +11,7 @@ const context = (body: URLSearchParams) => ({ expectedRevision: Number(string(bo
 async function actionFrom(body: URLSearchParams): Promise<StudentAction> {
   const intent=string(body,'intent');
   if(intent==='review')return{type:'BOOKKEEPING',command:{type:'REVIEW',targetId:string(body,'targetId')},context:context(body)};
+  if(intent==='verify-unchanged')return{type:'BOOKKEEPING',command:{type:'VERIFY_UNCHANGED',targetId:string(body,'targetId')},context:context(body)};
   if(intent==='bank-decision'){
     const entryId=string(body,'entryId'),decision=string(body,'decision');
     if(decision==='MATCH')return{type:'BOOKKEEPING',command:{type:'MATCH',bankActivityId:entryId,targetId:string(body,'targetId')},context:context(body)};
@@ -68,7 +70,7 @@ function originAllowed(request: IncomingMessage, url: URL) {
 
 async function page(request: IncomingMessage, response: ServerResponse) {
   const url=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`);
-  if(url.pathname==='/assets/student.css'){response.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});response.end(studentCss);return;}
+  if(url.pathname==='/assets/student.css'){response.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});response.end(studentCss+narrowLayoutCss);return;}
   if(url.pathname==='/assets/student.js'){response.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});response.end(studentJs);return;}
   if(url.pathname==='/login'&&request.method==='GET'&&localAuthenticationEnabled){response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(loginPage());return;}
   const protectedPost=request.method==='POST'&&['/auth/login','/auth/logout','/action'].includes(url.pathname);

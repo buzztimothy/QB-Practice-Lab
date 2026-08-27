@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NotFoundError } from '../packages/accounting-domain/src/errors.js';
 import { StudentApplication, type StudentAction } from '../apps/student/application.js';
 import { renderStudentApplication } from '../apps/web/student-ui.js';
+import { narrowLayoutCss } from '../apps/web/narrow-layout.js';
 import type { StudentBookkeepingCommand } from '../packages/accounting-domain/src/suncoast-commands.js';
 
 const auth = { studentId: 'student-a' } as const;
@@ -58,7 +59,7 @@ describe('P-009 student application shell', () => {
     expect((await app.act(auth, attemptId, { type: 'SEND_MESSAGE', conversationId, content: 'Please send the payroll support report.' })).ok).toBe(true);
     view = await app.view(auth, { attemptId, screen: 'coach', returnTo: 'bank' });
     expect(view.data.coaching).toHaveLength(1); expect(view.data.inbox[0].messages.map(item => item.sender)).toEqual(['STUDENT','CLIENT']);
-    const html = renderStudentApplication(view); expect(html).toContain('Private — not shared with Michael'); expect(html).toContain('Return to prior work');
+    const html = renderStudentApplication(view); expect(html).toContain('Private — not shared with Michael'); expect(html).toContain('What worked:'); expect(html).toContain('What to strengthen:'); expect(html).toContain('Why it matters:'); expect(html).toContain('Try this:'); expect(html).not.toContain('[object Object]'); expect(html).toContain('Return to prior work');
   });
 
   it('renders semantic, keyboard-operable critical workflows and responsive accounting regions', async () => {
@@ -72,7 +73,11 @@ describe('P-009 student application shell', () => {
     }
     const reports = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'reports', returnTo: 'bank' })); expect(reports).toContain('General Ledger'); expect(reports).toContain('Return to prior work');
     const salesView = await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales' }); const customer = salesView.data.customers[0]; const customerDetail = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales', focusId: customer.id })); expect(customerDetail).toContain('Customer detail');
-    expect(renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'bank' }))).toContain('Checking register'); expect((await import('../apps/web/student-ui.js')).studentJs).toContain('Exclude this activity from the books?');
+    const bankHtml = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'bank' })); expect(bankHtml).toContain('Checking register'); expect(bankHtml).toContain('BF-001'); expect(bankHtml).toContain('Open detail'); expect(bankHtml).toContain('Mark reviewed'); const browserJs=(await import('../apps/web/student-ui.js')).studentJs; expect(browserJs).toContain('Exclude this activity from the books?'); expect(browserJs).toContain("setAttribute('role','dialog')"); expect(browserJs).toContain("confirm.textContent='Confirm'"); expect(browserJs).toContain("cancel.textContent='Cancel'");
+    const salesHtml = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales' })); expect(salesHtml).toContain('Edit deposit details'); expect(salesHtml).toContain('Keep as recorded');
+    expect(narrowLayoutCss).toContain('main{min-width:0}'); expect(narrowLayoutCss).toContain('.table-scroll{max-width:100%}');
+    const bankView=await app.view(auth,{attemptId:start.shell.attemptId,screen:'bank'}); const selectedEntry=bankView.data.bankEntries[0]; const registerHtml=renderStudentApplication(await app.view(auth,{attemptId:start.shell.attemptId,screen:'register',accountId:selectedEntry.lines[0].accountId,focusId:selectedEntry.id})); expect(registerHtml).toContain('Keep as recorded');
+    const documentsView = await app.view(auth, { attemptId: start.shell.attemptId, screen: 'documents' }); const receipt = documentsView.data.documents.find(item => item.title.includes('Equipment Receipt'))!; const receiptHtml = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'documents', focusId: receipt.id })); expect(receiptHtml).toContain('<dt>Quantity</dt><dd>1</dd>'); expect(receiptHtml).not.toContain('<dt>Quantity</dt><dd>$0.01</dd>');
   }, 60_000);
 });
 
@@ -81,32 +86,33 @@ describe('P-009 protected application reachability', () => {
     const app = new StudentApplication(); let model = await app.start(auth); const attemptId = model.shell.attemptId;
     const run = async (action: StudentAction) => { const result = await app.act(auth, attemptId, action); expect(result, `${action.type}: ${'command' in action ? action.command.type : ''} — ${result.message}`).toMatchObject({ ok: true }); model = await app.view(auth, { attemptId, screen: 'dashboard' }); };
     const command = async (value: StudentBookkeepingCommand) => run({ type: 'BOOKKEEPING', command: value, context: { expectedRevision: model.shell.revision, idempotencyKey: `p009-${model.shell.revision + 1}`, help: 'INDEPENDENT' } });
+    const saveCorrection = async (entryId: string) => run({ type: 'SAVE_CORRECTION', entryId, context: { expectedRevision: model.shell.revision, idempotencyKey: `p009-${model.shell.revision + 1}`, help: 'INDEPENDENT' } });
     const entryByAmount = (cents: number, predicate: (entry: typeof model.data.entries[number]) => boolean = () => true) => model.data.entries.find(entry => amount(entry) === cents && predicate(entry))!;
     const documentLink = (title: string) => model.data.documents.find(document => document.title.includes(title))!.links[0].recordId;
 
     model = await app.view(auth, { attemptId, screen: 'documents' });
     const supportedSherwin = documentLink('Sherwin-Williams'); const duplicateSherwin = model.data.entries.find(entry => amount(entry) === 48736 && entry.id !== supportedSherwin)!;
-    await command({ type: 'VOID', entryId: duplicateSherwin.id });
-    const owner = entryByAmount(500000, entry => entry.lines.some(line => line.account === 'Operating Checking' && line.debit.cents === 500000)); await command({ type: 'CORRECT_OWNER_CONTRIBUTION', entryId: owner.id });
-    await command({ type: 'CORRECT_VEHICLE_LOAN', entryId: documentLink('Loan Statement') });
-    await command({ type: 'CORRECT_PRESSURE_WASHER', entryId: documentLink('Equipment Receipt') });
+    await command({ type: 'EXCLUDE', entryId: duplicateSherwin.id });
+    const owner = entryByAmount(500000, entry => entry.lines.some(line => line.account === 'Operating Checking' && line.debit.cents === 500000)); await saveCorrection(owner.id);
+    await saveCorrection(documentLink('Loan Statement'));
+    await saveCorrection(documentLink('Equipment Receipt'));
 
     model = await app.view(auth, { attemptId, screen: 'inbox' }); const conversationId = model.data.inbox[0].id;
     for (const content of ['Please send the ABC agreement.','Please send the payroll support report.','Was the June 24 card activity personal?']) await run({ type: 'SEND_MESSAGE', conversationId, content });
     model = await app.view(auth, { attemptId, screen: 'documents' });
-    await command({ type: 'RESOLVE_ABC', entryId: documentLink('Deposit Agreement') });
+    await saveCorrection(documentLink('Deposit Agreement'));
     const martinezPayment = model.data.payments.find(item => item.reference === 'RCPT-MARTINEZ-0612')!; const martinezBank = model.data.entries.find(entry => amount(entry) === martinezPayment.amount.cents && entry.id !== model.data.entries.find(item => item.id === model.data.payments.find(payment => payment.id === martinezPayment.id)?.id)?.id && entry.source === 'BANK_ACTIVITY')!; await command({ type: 'MATCH', bankActivityId: martinezBank.id, targetId: martinezPayment.id });
     const reynolds = model.data.payments.find(item => item.reference === 'RCPT-REYNOLDS-0615')!, reynoldsInvoices = model.data.invoices.filter(item => item.customer === reynolds.customer); await command({ type: 'REAPPLY_PAYMENT', paymentId: reynolds.id, fromInvoiceId: reynoldsInvoices.find(item => item.number === 'REY-B')!.invoiceId, toInvoiceId: reynoldsInvoices.find(item => item.number === 'REY-A')!.invoiceId });
     const rentEntries = model.data.entries.filter(entry => amount(entry) === 250000 && entry.date === '2026-06-02'); const rentDuplicate = rentEntries.find(entry => entry.source === 'BANK_ACTIVITY')!, rentOriginal = rentEntries.find(entry => entry.id !== rentDuplicate.id)!; await command({ type: 'MATCH', bankActivityId: rentDuplicate.id, targetId: rentOriginal.id });
-    model = await app.view(auth, { attemptId, screen: 'sales' }); const capePayment = model.data.payments.find(item => item.reference === 'RCPT-PAINT-0628')!, capeDeposit = model.data.deposits.find(item => item.payments.some(payment => payment?.id === capePayment.id))!; await command({ type: 'CORRECT_DEPOSIT_TRANSFER', entryId: capeDeposit.journalEntryId });
-    model = await app.view(auth, { attemptId, screen: 'documents' }); await command({ type: 'RESTORE_HISTORICAL_TRANSACTION', entryId: model.data.entries.find(item => item.description.includes('Office Depot'))!.id });
-    await command({ type: 'RESOLVE_PERSONAL_CARD', entryId: documentLink('Card Activity Clarification') });
-    model = await app.view(auth, { attemptId }); await command({ type: 'CORRECT_CARD_PAYMENT', entryId: model.data.entries.find(item => item.source === 'CARD_PAYMENT')!.id });
-    model = await app.view(auth, { attemptId, screen: 'documents' }); const payrollIds = model.data.documents.find(item => item.title.includes('Payroll Report'))!.links.map(link => link.recordId); await command({ type: 'CORRECT_PAYROLL', entryIds: payrollIds });
+    model = await app.view(auth, { attemptId, screen: 'sales' }); const capePayment = model.data.payments.find(item => item.reference === 'RCPT-PAINT-0628')!, capeDeposit = model.data.deposits.find(item => item.payments.some(payment => payment?.id === capePayment.id))!; await saveCorrection(capeDeposit.journalEntryId);
+    model = await app.view(auth, { attemptId, screen: 'documents' }); await saveCorrection(model.data.entries.find(item => item.description.includes('Office Depot'))!.id);
+    await saveCorrection(documentLink('Card Activity Clarification'));
+    model = await app.view(auth, { attemptId }); await saveCorrection(model.data.entries.find(item => item.source === 'CARD_PAYMENT')!.id);
+    model = await app.view(auth, { attemptId, screen: 'documents' }); const payrollIds = model.data.documents.find(item => item.title.includes('Payroll Report'))!.links.map(link => link.recordId); await saveCorrection(payrollIds[0]);
     model = await app.view(auth, { attemptId, screen: 'accounts' }); const target = model.data.accounts.find(item => item.name === 'Advertising & Marketing')!, sources = ['Advertising','Advertising Expense','Marketing','Marketing & Advertising'].map(name => model.data.accounts.find(item => item.name === name)!.id); await command({ type: 'CONSOLIDATE_ACCOUNTS', sourceAccountIds: sources, targetAccountId: target.id });
 
     model = await app.view(auth, { attemptId, screen: 'reconcile' });
-    for (const reconciliation of model.data.reconciliations.filter(item => item.status === 'IN_PROGRESS')) for (const line of reconciliation.lines) { await command({ type: 'SET_RECONCILIATION_LINE', reconciliationId: reconciliation.id, lineId: line.id, cleared: true }); model = await app.view(auth, { attemptId, screen: 'reconcile' }); }
+    for (const reconciliation of model.data.reconciliations.filter(item => item.status === 'IN_PROGRESS')) for (const line of reconciliation.lines.filter(item => !item.cleared)) { await command({ type: 'SET_RECONCILIATION_LINE', reconciliationId: reconciliation.id, lineId: line.id, cleared: true }); model = await app.view(auth, { attemptId, screen: 'reconcile' }); }
     model = await app.view(auth, { attemptId, screen: 'documents' });
     for (const targetId of [documentLink('Home Depot Receipt — June 22 Morning'), model.data.invoices.find(item => item.number === 'JEN-OPEN')!.invoiceId, documentLink('Year-End Entry Support'), model.data.payments.find(item => item.reference === 'CLIENT-ADVANCE-0630')!.id, model.data.payments.find(item => item.reference === 'RCPT-PALM-0626')!.id]) await command({ type: 'VERIFY_UNCHANGED', targetId });
     model = await app.view(auth, { attemptId, screen: 'reconcile' }); for (const reconciliation of model.data.reconciliations.filter(item => item.status === 'IN_PROGRESS')) await command({ type: 'FINISH_RECONCILIATION', reconciliationId: reconciliation.id });
