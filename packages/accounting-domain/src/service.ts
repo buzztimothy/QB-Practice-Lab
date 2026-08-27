@@ -78,4 +78,4 @@ export function balanceSheet(attempt: StudentAttempt): BalanceSheet {
   const currentEarningsCents = profitAndLoss(attempt).netIncomeCents;
   return { assets, liabilities, equity, currentEarningsCents, totalAssetsCents: assets.reduce((sum, row) => sum + row.amountCents, 0), totalLiabilitiesAndEquityCents: [...liabilities, ...equity].reduce((sum, row) => sum + row.amountCents, 0) + currentEarningsCents };
 }
-export function studentView(attempt: StudentAttempt) { return { id: attempt.id, templateId: attempt.templateId, generation: attempt.generation, status: attempt.status, accounts: attempt.accounts, entries: attempt.entries, unlockedDocumentIds: attempt.unlockedDocumentIds }; }
+export function studentView(attempt: StudentAttempt) { return { id: attempt.id, templateId: attempt.templateId, generation: attempt.generation, status: attempt.status, accounts: attempt.accounts.map(account => ({ id: account.id, attemptId: account.attemptId, code: account.code, name: account.name, kind: account.kind, operationalRole: account.operationalRole })), entries: attempt.entries, unlockedDocumentIds: attempt.unlockedDocumentIds }; }

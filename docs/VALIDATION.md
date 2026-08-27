@@ -122,3 +122,14 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-25:
 - P-008 coverage proves all six canonical classifications and display labels, deterministic competency interpretations, authoritative point presentation, evidence-grounded strengths and development guidance, qualitative help and self-correction summaries, bounded critical-risk language, instructor-data secrecy, immutable/versioned reports, idempotent generation, retry separation, malformed-input rejection, and server-side ownership isolation.
 - Final review removed unsupported communication inferences, made help-dependence wording follow the authoritative competency result, distinguished coached from independent critical self-correction, represented all five P-007 explanation dimensions, bounded Client Ready as a Lab 1 recommendation rather than a credential or guarantee, and added fail-closed evidence/weight provenance validation.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-008A validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
+
+- Frozen pnpm installation and the minimum Prisma/esbuild rebuild passed without lockfile changes. Prisma generation and validation passed; both migrations deployed and status reported current.
+- All 228 P-008A through P-000 unit, integration, adversarial, API/security, and PostgreSQL tests passed across 15 files. The 17 database enforcement tests passed directly against PostgreSQL.
+- The 19 command-foundation tests prove bank review/match/categorize/transfer/exclude, bounded corrections and voids, Reynolds reapplication, loan/payroll compound corrections, evidence-gated ABC/personal decisions, COA consolidation, store-level optimistic concurrency, idempotency, atomic failure, immutable assessment chronology, historical reconciliation repair, zero-difference completion, protected resolution, and command-authorized Close → Final Meeting → Results reachability.
+- Student projections were hardened to omit template-account provenance as well as command fingerprints, private before/after snapshots, critical hooks, scenario identifiers, and completed-reconciliation fingerprints.
+- Final review constrained every fixed-value correction to its intended attempt scenario, blocked generic ledger mutation of operationally linked records, fixed Reynolds target-open/A/R enforcement, made payroll input order deterministic, added compare-and-swap persistence semantics, preserved notes and evidence horizons in private provenance, retained critical guesses through later correction, and withheld the personal-equity account from command DTOs until clarification.
+- Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
