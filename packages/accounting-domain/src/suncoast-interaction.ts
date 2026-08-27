@@ -97,7 +97,8 @@ export function recognizeInteractionIntent(content: string): InteractionIntent {
   if (/\bpayroll\b|june 1.?14|june 14/.test(normalized) && requestsDocument) return 'PAYROLL_DOCUMENT_REQUEST';
   if (/\bjenkins\b|1,?425/.test(normalized) && /\b(owe|paid|collect|invoice|status)\b/.test(normalized)) return 'JENKINS_STATUS';
   if (/\b750\b|\bunapplied\b|\bfuture job\b|\badvance\b/.test(normalized)) return 'UNAPPLIED_DISPOSITION';
-  if (/286\.43|june 24/.test(normalized) || (/\b(visa|card)\b/.test(normalized) && /\bpersonal\b/.test(normalized))) return 'PERSONAL_CARD';
+  const identifiesPersonalCardActivity = /286\.43|june 24/.test(normalized) && /\b(personal|business|suncoast|work|purpose|for)\b/.test(normalized);
+  if (identifiesPersonalCardActivity || (/\b(visa|card)\b/.test(normalized) && /\bpersonal\b/.test(normalized))) return 'PERSONAL_CARD';
   if (/\b(tax|deduct|write.?off)\b|\btax return\b|\btax advice\b/.test(normalized)) return 'TAX_BOUNDARY';
   if (/\b(cpa|historical)\b|\bprior.year\b|\bjournal entry\b/.test(normalized)) return 'CPA_ENTRY';
   if (/\bwhat was\b|\bwhat is\b|\bdon't recognize\b|\bdo not recognize\b|\bunknown\b|\bunclear\b/.test(normalized) && /\b(charge|transaction|payment)\b/.test(normalized)) return 'AMBIGUOUS_TRANSACTION';
