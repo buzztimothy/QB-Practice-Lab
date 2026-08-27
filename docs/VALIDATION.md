@@ -133,3 +133,14 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
 - Student projections were hardened to omit template-account provenance as well as command fingerprints, private before/after snapshots, critical hooks, scenario identifiers, and completed-reconciliation fingerprints.
 - Final review constrained every fixed-value correction to its intended attempt scenario, blocked generic ledger mutation of operationally linked records, fixed Reynolds target-open/A/R enforcement, made payroll input order deterministic, added compare-and-swap persistence semantics, preserved notes and evidence horizons in private provenance, retained critical guesses through later correction, and withheld the personal-equity account from command DTOs until clarification.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-010 browser acceptance validation
+
+Validated against a fresh disposable PostgreSQL 16 database and the compiled student web application on 2026-08-27:
+
+- Prisma generation and validation passed; both migrations deployed and status reported current.
+- All 236 P-010 through P-000 unit, integration, adversarial, API/security, and PostgreSQL tests passed across 16 files in the authoritative serial run. The 17 database enforcement tests passed directly against PostgreSQL.
+- The complete desktop student journey passed in Codex in-app Chromium: orientation, investigation, evidence unlocks, Michael and Coach interactions, supported bookkeeping decisions and corrections, reports and drill-through, zero-difference checking and Visa reconciliations, stale-close invalidation, final meeting, results, history, reset, bounded foreign routes, persistence, double-click idempotency, and stale-tab recovery.
+- Browser review found and corrected seven bounded acceptance defects: structured Coach rendering, generic Visa-purpose over-disclosure, receipt quantity formatting, neutral bank-feed references and detail access, a missing deposit correction control, missing legitimate unchanged controls, and inaccessible native confirmation prompts.
+- Student payload scanning found no protected instructor or clean-master terms. Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+- A real narrow-viewport run remains unexecuted because the available browser ignored its advertised viewport override. True cross-student browser-session testing also remains unavailable in the fixed local-identity shell; bounded route denial and the server-side ownership suite passed. Keyboard semantics and the accessible in-page confirmation dialog passed markup/browser inspection, but synthetic Enter/Space activation was not supported by the browser driver.

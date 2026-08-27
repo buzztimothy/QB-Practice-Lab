@@ -11,6 +11,7 @@ const context = (body: URLSearchParams) => ({ expectedRevision: Number(string(bo
 async function actionFrom(body: URLSearchParams): Promise<StudentAction> {
   const intent=string(body,'intent');
   if(intent==='review')return{type:'BOOKKEEPING',command:{type:'REVIEW',targetId:string(body,'targetId')},context:context(body)};
+  if(intent==='verify-unchanged')return{type:'BOOKKEEPING',command:{type:'VERIFY_UNCHANGED',targetId:string(body,'targetId')},context:context(body)};
   if(intent==='bank-decision'){
     const entryId=string(body,'entryId'),decision=string(body,'decision');
     if(decision==='MATCH')return{type:'BOOKKEEPING',command:{type:'MATCH',bankActivityId:entryId,targetId:string(body,'targetId')},context:context(body)};

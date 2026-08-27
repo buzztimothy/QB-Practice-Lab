@@ -58,7 +58,7 @@ describe('P-009 student application shell', () => {
     expect((await app.act(auth, attemptId, { type: 'SEND_MESSAGE', conversationId, content: 'Please send the payroll support report.' })).ok).toBe(true);
     view = await app.view(auth, { attemptId, screen: 'coach', returnTo: 'bank' });
     expect(view.data.coaching).toHaveLength(1); expect(view.data.inbox[0].messages.map(item => item.sender)).toEqual(['STUDENT','CLIENT']);
-    const html = renderStudentApplication(view); expect(html).toContain('Private — not shared with Michael'); expect(html).toContain('Return to prior work');
+    const html = renderStudentApplication(view); expect(html).toContain('Private — not shared with Michael'); expect(html).toContain('What worked:'); expect(html).toContain('What to strengthen:'); expect(html).toContain('Why it matters:'); expect(html).toContain('Try this:'); expect(html).not.toContain('[object Object]'); expect(html).toContain('Return to prior work');
   });
 
   it('renders semantic, keyboard-operable critical workflows and responsive accounting regions', async () => {
@@ -72,7 +72,10 @@ describe('P-009 student application shell', () => {
     }
     const reports = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'reports', returnTo: 'bank' })); expect(reports).toContain('General Ledger'); expect(reports).toContain('Return to prior work');
     const salesView = await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales' }); const customer = salesView.data.customers[0]; const customerDetail = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales', focusId: customer.id })); expect(customerDetail).toContain('Customer detail');
-    expect(renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'bank' }))).toContain('Checking register'); expect((await import('../apps/web/student-ui.js')).studentJs).toContain('Exclude this activity from the books?');
+    const bankHtml = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'bank' })); expect(bankHtml).toContain('Checking register'); expect(bankHtml).toContain('BF-001'); expect(bankHtml).toContain('Open detail'); expect(bankHtml).toContain('Mark reviewed'); const browserJs=(await import('../apps/web/student-ui.js')).studentJs; expect(browserJs).toContain('Exclude this activity from the books?'); expect(browserJs).toContain("setAttribute('role','dialog')"); expect(browserJs).toContain("confirm.textContent='Confirm'"); expect(browserJs).toContain("cancel.textContent='Cancel'");
+    const salesHtml = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales' })); expect(salesHtml).toContain('Edit deposit details'); expect(salesHtml).toContain('Keep as recorded');
+    const bankView=await app.view(auth,{attemptId:start.shell.attemptId,screen:'bank'}); const selectedEntry=bankView.data.bankEntries[0]; const registerHtml=renderStudentApplication(await app.view(auth,{attemptId:start.shell.attemptId,screen:'register',accountId:selectedEntry.lines[0].accountId,focusId:selectedEntry.id})); expect(registerHtml).toContain('Keep as recorded');
+    const documentsView = await app.view(auth, { attemptId: start.shell.attemptId, screen: 'documents' }); const receipt = documentsView.data.documents.find(item => item.title.includes('Equipment Receipt'))!; const receiptHtml = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'documents', focusId: receipt.id })); expect(receiptHtml).toContain('<dt>Quantity</dt><dd>1</dd>'); expect(receiptHtml).not.toContain('<dt>Quantity</dt><dd>$0.01</dd>');
   }, 60_000);
 });
 
