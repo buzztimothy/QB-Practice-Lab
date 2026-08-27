@@ -23,6 +23,8 @@ describe('P-009 student application shell', () => {
     expect(json).not.toMatch(/instructor|hiddenFacts|cleanMaster|provenance|criticalHooks|unlockRules|fingerprint|expected treatment|Owner Draws|abc-deposit-agreement|payroll-report-june-14|card-clarification-0624/i);
     expect(initial.data.documents.some(item => item.title.includes('Client Information'))).toBe(true);
     expect(renderStudentApplication(initial)).not.toContain('locked');
+    const hidden = await app.act(auth, start.shell.attemptId, { type: 'OPEN_DOCUMENT', documentId: 'payroll-report-june-14' }); const guessed = await app.act(auth, start.shell.attemptId, { type: 'OPEN_DOCUMENT', documentId: 'not-a-document' });
+    expect(hidden).toMatchObject({ ok: false }); expect(hidden.message).toBe(guessed.message);
   });
 
   it('uses authoritative revisions and idempotency without optimistic duplicate state', async () => {
@@ -68,6 +70,9 @@ describe('P-009 student application shell', () => {
       if (html.includes('<table')) { expect(html).toContain('<caption>'); expect(html).toContain('role="region"'); }
       if (html.includes('<textarea')) expect(html).toMatch(/<label for="[^"]+">/);
     }
+    const reports = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'reports', returnTo: 'bank' })); expect(reports).toContain('General Ledger'); expect(reports).toContain('Return to prior work');
+    const salesView = await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales' }); const customer = salesView.data.customers[0]; const customerDetail = renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'sales', focusId: customer.id })); expect(customerDetail).toContain('Customer detail');
+    expect(renderStudentApplication(await app.view(auth, { attemptId: start.shell.attemptId, screen: 'bank' }))).toContain('Checking register'); expect((await import('../apps/web/student-ui.js')).studentJs).toContain('Exclude this activity from the books?');
   }, 60_000);
 });
 
@@ -107,10 +112,11 @@ describe('P-009 protected application reachability', () => {
     model = await app.view(auth, { attemptId, screen: 'reconcile' }); for (const reconciliation of model.data.reconciliations.filter(item => item.status === 'IN_PROGRESS')) await command({ type: 'FINISH_RECONCILIATION', reconciliationId: reconciliation.id });
 
     await run({ type: 'CLOSE_BOOKS' }); expect((await app.view(auth, { attemptId })).dashboard.closeStatus).toBe('READY_FOR_FINAL_REVIEW');
+    const postCloseTarget=model.data.entries[0].id; await command({ type: 'REVIEW', targetId: postCloseTarget }); const staleClose=await app.view(auth,{attemptId,screen:'close'}); expect(staleClose.shell.capabilities.meeting).toBe(false); expect(staleClose.dashboard.closeStatus).toBe('OPEN'); expect((await app.act(auth,attemptId,{type:'BEGIN_MEETING'})).ok).toBe(false); await run({type:'CLOSE_BOOKS'}); expect((await app.view(auth,{attemptId})).dashboard.closeStatus).toBe('READY_FOR_FINAL_REVIEW');
     await run({ type: 'BEGIN_MEETING' });
     await run({ type: 'SUBMIT_EXPLANATION', explanation: "June revenue was $43,000, up from May's $38,750 and April's $33,700. June net income was $25,365.28 after $17,634.72 of expenses. Checking is $84,422, but cash is not the same as profit. Jenkins owes $1,425 and Reynolds owes $2,275, so those receivables need follow-up. The Visa balance is $4,308.15 and the vehicle loan is $27,910; the books show those balances, but they do not establish that the debt is a problem." });
     model = await app.view(auth, { attemptId, screen: 'meeting' }); for (const followUp of model.data.meeting!.followUps ?? []) await run({ type: 'ANSWER_FOLLOW_UP', followUpId: followUp.id, response: 'The books support follow-up, but they do not justify a guarantee or unsupported conclusion.' });
     await run({ type: 'FINALIZE_RESULTS' }); const results = await app.view(auth, { attemptId, screen: 'results' }); expect(results.data.results?.header.title).toBe('Are You Really Ready for Clients?'); expect(results.shell.attemptStatus).toBe('COMPLETED');
-    const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.shell.attemptNumber).toBe(2);
+    const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.history[0]).toMatchObject({ status: 'COMPLETED', hasResults: true }); expect(next.shell.attemptNumber).toBe(2);
   }, 60_000);
 });
