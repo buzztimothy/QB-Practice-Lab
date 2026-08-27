@@ -133,3 +133,12 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
 - Student projections were hardened to omit template-account provenance as well as command fingerprints, private before/after snapshots, critical hooks, scenario identifiers, and completed-reconciliation fingerprints.
 - Final review constrained every fixed-value correction to its intended attempt scenario, blocked generic ledger mutation of operationally linked records, fixed Reynolds target-open/A/R enforcement, made payroll input order deterministic, added compare-and-swap persistence semantics, preserved notes and evidence horizons in private provenance, retained critical guesses through later correction, and withheld the personal-equity account from command DTOs until clarification.
 - Lint, typecheck, production build, `git diff --check`, and compiled API/web smoke tests passed.
+
+## P-009A validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
+
+- Frozen pnpm installation completed without dependency or lockfile changes. Prisma generation and schema validation passed; both migrations deployed and status reported current.
+- All 240 P-009A through P-000 unit, integration, adversarial, API/security, and PostgreSQL tests passed across 17 files in the authoritative serial run. The 17 database enforcement tests passed directly against PostgreSQL.
+- P-009A coverage proves safe unauthenticated failure, two distinct opaque HttpOnly sessions and principals, refresh persistence, local session replacement and logout revocation, production disabling of the fictional selector, browser-controlled spoof resistance, cross-student mutation and copied-route denial, and identical foreign/nonexistent responses across attempt, transaction, document, conversation, coaching, meeting, and Results surfaces.
+- Lint, typecheck, production build, and `git diff --check` passed. Compiled API/web smoke checks proved API health, unauthenticated `401`, independent Student A and Student B attempts in separate cookie jars, and bounded `404` foreign access.

@@ -11,4 +11,4 @@ Standalone client bookkeeping practice lab. The P-009 local student application 
 - `prisma`: PostgreSQL schema and migrations
 - `tests`: unit, adversarial API, and PostgreSQL integration tests
 
-Use Node 22, PostgreSQL 16+, `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm test`, and `pnpm build`. Run the local shell with `pnpm start:web` after building, then open `http://localhost:3000`.
+Use Node 22, PostgreSQL 16+, `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm test`, and `pnpm build`. Run the local shell with `pnpm start:web` after building, then open `http://localhost:3000`. In local development, select the predefined fictional Student A or Student B profile; the server creates an opaque HttpOnly session. The local selector is disabled when `NODE_ENV=production` and is not a production authentication provider.
