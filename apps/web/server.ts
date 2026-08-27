@@ -1,9 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { StudentApplication, studentScreens, type StudentAction, type StudentScreen } from '../student/application.js';
 import { studentCss, studentJs, renderStudentApplication } from './student-ui.js';
+import { InMemoryStudentSessionAuthenticator, localDevelopmentProfiles, type StudentSessionAuthenticator } from './authentication.js';
 
-const application = new StudentApplication();
-const auth = Object.freeze({ studentId: 'local-student' });
 const readBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return new URLSearchParams(Buffer.concat(chunks).toString('utf8')); };
 const string = (body: URLSearchParams, key: string) => body.get(key) ?? '';
 const context = (body: URLSearchParams) => ({ expectedRevision: Number(string(body,'revision')), idempotencyKey: string(body,'key'), help: 'INDEPENDENT' as const });
@@ -38,10 +37,46 @@ async function actionFrom(body: URLSearchParams): Promise<StudentAction> {
   throw new Error('Unsupported action');
 }
 
+const securityHeaders = {'content-security-policy':"default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff'};
+const unavailable = '<main><h1>Workspace unavailable</h1><p>The requested attempt or action is unavailable.</p></main>';
+const forbidden = '<main><h1>Request unavailable</h1><p>The request could not be accepted.</p></main>';
+const loginPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local student sign in · BBB Client Practice Lab</title></head><body><main><h1>Local development sign in</h1><p>Select a fictional student profile. This local-only page creates a trusted server-side session.</p>${localDevelopmentProfiles.map(profile=>`<form method="post" action="/auth/login"><input type="hidden" name="profile" value="${profile.key}"><button type="submit">Continue as ${profile.principal.displayName}</button></form>`).join('')}</main></body></html>`;
+
+export interface StudentWebServerOptions {
+  readonly application?: StudentApplication;
+  readonly authenticator?: StudentSessionAuthenticator;
+  readonly localAuthenticator?: InMemoryStudentSessionAuthenticator;
+  readonly localAuthenticationEnabled?: boolean;
+  readonly productionMode?: boolean;
+  readonly allowedOrigin?: string;
+  readonly secureCookies?: boolean;
+}
+
+export function createStudentWebServer(options: StudentWebServerOptions = {}) {
+  const application = options.application ?? new StudentApplication();
+  const localAuthenticator = options.localAuthenticator ?? new InMemoryStudentSessionAuthenticator();
+  const authenticator = options.authenticator ?? localAuthenticator;
+  const productionMode = options.productionMode ?? process.env.NODE_ENV === 'production';
+  const localAuthenticationEnabled = !productionMode && (options.localAuthenticationEnabled ?? process.env.LOCAL_AUTH_ENABLED === 'true');
+  const allowedOrigin = options.allowedOrigin ?? process.env.APP_ORIGIN;
+  const secureCookies = options.secureCookies ?? (productionMode || allowedOrigin?.startsWith('https://') === true);
+
+function originAllowed(request: IncomingMessage, url: URL) {
+  const expected = allowedOrigin ?? (productionMode ? undefined : url.origin);
+  return !!expected && request.headers.origin === expected;
+}
+
 async function page(request: IncomingMessage, response: ServerResponse) {
   const url=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`);
   if(url.pathname==='/assets/student.css'){response.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});response.end(studentCss);return;}
   if(url.pathname==='/assets/student.js'){response.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});response.end(studentJs);return;}
+  if(url.pathname==='/login'&&request.method==='GET'&&localAuthenticationEnabled){response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(loginPage());return;}
+  const protectedPost=request.method==='POST'&&['/auth/login','/auth/logout','/action'].includes(url.pathname);
+  if(protectedPost&&!originAllowed(request,url)){response.writeHead(403,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(forbidden);return;}
+  if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=localAuthenticator.replace(request,string(body,'profile'),secureCookies);if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
+  if(url.pathname==='/auth/logout'&&request.method==='POST'&&localAuthenticationEnabled){localAuthenticator.destroy(request);response.writeHead(303,{location:'/login','set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store'});response.end();return;}
+  const auth=authenticator.authenticate(request);
+  if(!auth){const json=url.pathname==='/api/student';response.writeHead(401,{'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(json?JSON.stringify({error:'Authentication required'}):localAuthenticationEnabled?loginPage():unavailable);return;}
   if(request.method==='POST'&&url.pathname==='/action'){
     const body=await readBody(request),attemptId=string(body,'attemptId'),screen=(string(body,'screen')||'dashboard') as StudentScreen;
     const action=await actionFrom(body),result=await application.act(auth,attemptId,action); const preservedReturn=string(body,'returnTo'); const focus=action.type==='OPEN_DOCUMENT'?`&focus=${encodeURIComponent(action.documentId)}${preservedReturn?`&returnTo=${encodeURIComponent(preservedReturn)}`:''}`:''; const related=action.type==='FOLLOW_DOCUMENT'&&result.ok; const recordType=string(body,'recordType'); const destination=related?(recordType==='INVOICE'||recordType==='PAYMENT'||recordType==='DEPOSIT'?'sales':recordType==='RECONCILIATION'||recordType==='STATEMENT_TRUTH'?'reconcile':'register'):(result.attemptId!==attemptId?'meet':screen); const relatedQuery=related?`&focus=${encodeURIComponent(action.referenceId)}&returnTo=${encodeURIComponent(preservedReturn||'documents')}`:focus;
@@ -52,8 +87,11 @@ async function page(request: IncomingMessage, response: ServerResponse) {
   }
   let model; const attempt=url.searchParams.get('attempt')??undefined;
   if(!attempt)model=await application.start(auth);else{const requested=url.searchParams.get('screen')??'dashboard';const screen=studentScreens.includes(requested as StudentScreen)?requested as StudentScreen:'dashboard';model=await application.view(auth,{attemptId:attempt,screen,basis:url.searchParams.get('basis')==='CASH'?'CASH':'ACCRUAL',accountId:url.searchParams.get('accountId')??undefined,focusId:url.searchParams.get('focus')??undefined,returnTo:url.searchParams.get('returnTo')??undefined});}
-  response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff'});response.end(renderStudentApplication(model,url.searchParams.get('notice')??undefined));
+  response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(renderStudentApplication(model,url.searchParams.get('notice')??undefined));
 }
 
-export const studentWebServer=createServer((request,response)=>{page(request,response).catch(()=>{response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store'});response.end('<main><h1>Workspace unavailable</h1><p>The requested attempt or action is unavailable.</p></main>');});});
+  return createServer((request,response)=>{page(request,response).catch(()=>{response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);});});
+}
+
+export const studentWebServer=createStudentWebServer();
 if(process.env.NODE_ENV!=='test')studentWebServer.listen(Number(process.env.WEB_PORT??3000));
