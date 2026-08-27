@@ -1,5 +1,6 @@
 import { PracticeLabService, studentView, type PostLine } from '../../packages/accounting-domain/src/service.js';
 import { OperationalAccountingService, operationalStudentView, type OperationalStore } from '../../packages/accounting-domain/src/operations.js';
+import { StudentBookkeepingCommandService, type StudentBookkeepingCommand, type StudentCommandContext } from '../../packages/accounting-domain/src/suncoast-commands.js';
 export interface AuthenticatedRequest { studentId: string }
 export class StudentApi {
   constructor(private readonly lab: PracticeLabService) {}
@@ -12,4 +13,10 @@ export class OperationalStudentApi {
   constructor(private readonly operations: OperationalAccountingService, private readonly store: OperationalStore) {}
   async createCustomer(request: AuthenticatedRequest, attemptId: string, name: string) { return this.operations.createCustomer(request.studentId, attemptId, { name }); }
   async view(request: AuthenticatedRequest, attemptId: string) { const state = await this.store.findForStudent(attemptId, request.studentId); if (!state) return null; return operationalStudentView(state); }
+}
+
+export class StudentBookkeepingCommandApi {
+  constructor(private readonly commands: StudentBookkeepingCommandService) {}
+  async view(request: AuthenticatedRequest, attemptId: string) { return this.commands.view(request.studentId, attemptId); }
+  async execute(request: AuthenticatedRequest, attemptId: string, command: StudentBookkeepingCommand, context: StudentCommandContext) { return this.commands.execute(request.studentId, attemptId, command, context); }
 }

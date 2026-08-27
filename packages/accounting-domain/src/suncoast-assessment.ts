@@ -95,10 +95,10 @@ export function deriveSuncoastAssessment(coaching: SuncoastCoachingAttempt): Sun
     const provenance = coaching.interaction.evidence.p002.provenance.find(item => [...item.cleanRecordIds, ...item.studentRecordIds].includes(event.targetId));
     const scenarioId = event.hook ? coaching.interaction.evidence.p002.criticalHooks[event.hook] : provenance?.scenarioId;
     const rule = scenarioId ? scenarioRules[scenarioId] : undefined;
-    const verifiedCorrect = event.action === 'TRANSACTION_CORRECTED' || event.action === 'ACCOUNT_CONSOLIDATED' || event.action === 'SELF_CORRECTION' || event.selfCorrected === true;
+    const verifiedCorrect = event.action === 'TRANSACTION_CORRECTED' || event.action === 'ACCOUNT_CONSOLIDATED' || event.action === 'CONTROL_VERIFIED' || event.action === 'SELF_CORRECTION' || event.selfCorrected === true;
     const supportedEscalation = event.action === 'ISSUE_FLAGGED';
-    const outcome: EvidenceOutcome = event.hook ? 'INAPPROPRIATE' : verifiedCorrect ? 'CORRECT' : supportedEscalation ? 'ESCALATED_FOR_EVIDENCE' : 'OBSERVED';
-    result = appendAssessmentEvidence(result, { competency: rule?.competency ?? (event.action.includes('RECONCILIATION') ? 'INVESTIGATION_PROBLEM_SOLVING' : 'TECHNICAL_BOOKKEEPING'), type: event.action.includes('RECONCILIATION') ? 'RECONCILIATION' : event.selfCorrected ? 'SELF_CORRECTION' : 'ACCOUNTING_ACTION', source: { kind: 'P002_ACTION', id: `${event.sequence}:${event.targetId}`, attemptId: coaching.attemptId }, scenarioId: scenarioId as `SUN-L1-${string}` | undefined, criticalHook: event.hook, severity: event.hook ? 'CRITICAL' : 'ROUTINE', outcome, selfCorrected: event.selfCorrected ?? false, resolved: event.hook ? event.selfCorrected ?? false : verifiedCorrect || supportedEscalation, instructorExplanation: event.hook ? `Critical action hook ${event.hook}.` : `Recorded student bookkeeping action: ${event.action}; correctness is ${verifiedCorrect ? 'verified by the action contract' : 'not inferred'}.` });
+    const outcome: EvidenceOutcome = event.hook ? 'INAPPROPRIATE' : event.action === 'CONTROL_VERIFIED' ? 'LEGITIMATELY_UNCHANGED' : verifiedCorrect ? 'CORRECT' : supportedEscalation ? 'ESCALATED_FOR_EVIDENCE' : 'OBSERVED';
+    result = appendAssessmentEvidence(result, { competency: rule?.competency ?? (event.action.includes('RECONCILIATION') ? 'INVESTIGATION_PROBLEM_SOLVING' : 'TECHNICAL_BOOKKEEPING'), type: event.action.includes('RECONCILIATION') ? 'RECONCILIATION' : event.selfCorrected ? 'SELF_CORRECTION' : 'ACCOUNTING_ACTION', source: { kind: 'P002_ACTION', id: `${event.sequence}:${event.targetId}`, attemptId: coaching.attemptId }, scenarioId: scenarioId as `SUN-L1-${string}` | undefined, criticalHook: event.hook, severity: event.hook ? 'CRITICAL' : 'ROUTINE', outcome, helpLevel: event.helpLevel, selfCorrected: event.selfCorrected ?? false, resolved: event.hook ? event.selfCorrected ?? false : verifiedCorrect || supportedEscalation, instructorExplanation: event.hook ? `Critical action hook ${event.hook}.` : `Recorded student bookkeeping action: ${event.action}; correctness is ${verifiedCorrect ? 'verified by the action contract' : 'not inferred'}.` });
   }
   for (const conversation of coaching.interaction.conversations) for (const message of conversation.messages.filter(item => item.sender === 'STUDENT')) {
     result = appendAssessmentEvidence(result, { competency: 'CLIENT_COMMUNICATION', type: 'CLIENT_COMMUNICATION', source: { kind: 'CONVERSATION_MESSAGE', id: message.id, attemptId: coaching.attemptId }, severity: 'ROUTINE', outcome: 'OBSERVED', selfCorrected: false, resolved: true, instructorExplanation: 'Student communication preserved for observable-behavior review; no competence inferred without an observation.' });
@@ -127,14 +127,15 @@ export function appendAssessmentEvidence(value: SuncoastAssessmentAttempt, input
 }
 
 const financialJson = (value: unknown) => JSON.stringify(value, (key, item: unknown) => key.endsWith('Id') || key.endsWith('Ids') ? undefined : item);
+const profitAndLossJson = (value: { readonly revenue: readonly { readonly amountCents: number }[]; readonly expenses: readonly { readonly amountCents: number }[]; readonly netIncomeCents: number }) => financialJson({ ...value, revenue: value.revenue.filter(row => row.amountCents !== 0), expenses: value.expenses.filter(row => row.amountCents !== 0) });
 export async function compareAccountingCompletion(p002: P002InstructorState): Promise<AccountingCompletion> {
   const actual = p002FinancialSnapshot(p002);
   const resolvedState = await buildResolvedP002State(p002.attempt.state.attempt.studentId, `${p002.attempt.state.attempt.id}-comparison`, p002.attempt.state.attempt.generation);
   const expected = p002FinancialSnapshot({ ...p002, attempt: { ...p002.attempt, state: resolvedState } });
-  const names = (value: typeof actual.trialBalance) => Object.fromEntries(value.map(row => [row.name, [row.debitCents, row.creditCents]]));
+  const names = (value: typeof actual.trialBalance) => Object.fromEntries(value.filter(row => row.debitCents !== 0 || row.creditCents !== 0).map(row => [row.name, [row.debitCents, row.creditCents]]));
   const trialBalance = JSON.stringify(names(actual.trialBalance)) === JSON.stringify(names(expected.trialBalance));
-  const cashProfitAndLoss = financialJson(actual.cashJune) === financialJson(expected.cashJune);
-  const accrualProfitAndLoss = financialJson(actual.accrualJune) === financialJson(expected.accrualJune);
+  const cashProfitAndLoss = profitAndLossJson(actual.cashJune) === profitAndLossJson(expected.cashJune);
+  const accrualProfitAndLoss = profitAndLossJson(actual.accrualJune) === profitAndLossJson(expected.accrualJune);
   const balanceSheet = financialJson(actual.balanceSheet) === financialJson(expected.balanceSheet);
   const receivableAmounts = (rows: typeof actual.ar.customers) => rows.map(row => [row.invoiceOpenCents, row.unappliedPaymentCents, row.netReceivableCents]).sort((a, b) => a.join(':').localeCompare(b.join(':')));
   const accountsReceivable = actual.ar.controlDifferenceCents === 0 && JSON.stringify(receivableAmounts(actual.ar.customers)) === JSON.stringify(receivableAmounts(expected.ar.customers));
