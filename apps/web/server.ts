@@ -39,6 +39,7 @@ async function actionFrom(body: URLSearchParams): Promise<StudentAction> {
 
 const securityHeaders = {'content-security-policy':"default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff'};
 const unavailable = '<main><h1>Workspace unavailable</h1><p>The requested attempt or action is unavailable.</p></main>';
+const forbidden = '<main><h1>Request unavailable</h1><p>The request could not be accepted.</p></main>';
 const loginPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local student sign in · BBB Client Practice Lab</title></head><body><main><h1>Local development sign in</h1><p>Select a fictional student profile. This local-only page creates a trusted server-side session.</p>${localDevelopmentProfiles.map(profile=>`<form method="post" action="/auth/login"><input type="hidden" name="profile" value="${profile.key}"><button type="submit">Continue as ${profile.principal.displayName}</button></form>`).join('')}</main></body></html>`;
 
 export interface StudentWebServerOptions {
@@ -46,20 +47,33 @@ export interface StudentWebServerOptions {
   readonly authenticator?: StudentSessionAuthenticator;
   readonly localAuthenticator?: InMemoryStudentSessionAuthenticator;
   readonly localAuthenticationEnabled?: boolean;
+  readonly productionMode?: boolean;
+  readonly allowedOrigin?: string;
+  readonly secureCookies?: boolean;
 }
 
 export function createStudentWebServer(options: StudentWebServerOptions = {}) {
   const application = options.application ?? new StudentApplication();
   const localAuthenticator = options.localAuthenticator ?? new InMemoryStudentSessionAuthenticator();
   const authenticator = options.authenticator ?? localAuthenticator;
-  const localAuthenticationEnabled = options.localAuthenticationEnabled ?? process.env.NODE_ENV !== 'production';
+  const productionMode = options.productionMode ?? process.env.NODE_ENV === 'production';
+  const localAuthenticationEnabled = !productionMode && (options.localAuthenticationEnabled ?? process.env.LOCAL_AUTH_ENABLED === 'true');
+  const allowedOrigin = options.allowedOrigin ?? process.env.APP_ORIGIN;
+  const secureCookies = options.secureCookies ?? (productionMode || allowedOrigin?.startsWith('https://') === true);
+
+function originAllowed(request: IncomingMessage, url: URL) {
+  const expected = allowedOrigin ?? (productionMode ? undefined : url.origin);
+  return !!expected && request.headers.origin === expected;
+}
 
 async function page(request: IncomingMessage, response: ServerResponse) {
   const url=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`);
   if(url.pathname==='/assets/student.css'){response.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});response.end(studentCss);return;}
   if(url.pathname==='/assets/student.js'){response.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});response.end(studentJs);return;}
   if(url.pathname==='/login'&&request.method==='GET'&&localAuthenticationEnabled){response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(loginPage());return;}
-  if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=localAuthenticator.replace(request,string(body,'profile'));if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
+  const protectedPost=request.method==='POST'&&['/auth/login','/auth/logout','/action'].includes(url.pathname);
+  if(protectedPost&&!originAllowed(request,url)){response.writeHead(403,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(forbidden);return;}
+  if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=localAuthenticator.replace(request,string(body,'profile'),secureCookies);if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
   if(url.pathname==='/auth/logout'&&request.method==='POST'&&localAuthenticationEnabled){localAuthenticator.destroy(request);response.writeHead(303,{location:'/login','set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store'});response.end();return;}
   const auth=authenticator.authenticate(request);
   if(!auth){const json=url.pathname==='/api/student';response.writeHead(401,{'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(json?JSON.stringify({error:'Authentication required'}):localAuthenticationEnabled?loginPage():unavailable);return;}

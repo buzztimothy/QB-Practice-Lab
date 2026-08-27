@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createStudentWebServer } from '../apps/web/server.js';
+import { InMemoryStudentSessionAuthenticator } from '../apps/web/authentication.js';
 
 const servers: ReturnType<typeof createStudentWebServer>[] = [];
 
@@ -10,7 +11,7 @@ afterEach(async () => {
 });
 
 async function runningServer(options: Parameters<typeof createStudentWebServer>[0] = {}) {
-  const server = createStudentWebServer(options);
+  const server = createStudentWebServer({ localAuthenticationEnabled: true, ...options });
   servers.push(server);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address() as AddressInfo;
@@ -21,14 +22,14 @@ async function login(origin: string, profile: 'STUDENT_A' | 'STUDENT_B', extra =
   const response = await fetch(`${origin}/auth/login`, {
     method: 'POST',
     redirect: 'manual',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin },
     body: `profile=${profile}${extra}`,
   });
   const cookie = response.headers.get('set-cookie')!;
   return { response, cookie: cookie.split(';')[0] };
 }
 
-const authenticated = (url: string, cookie: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...init.headers, cookie } });
+const authenticated = (url: string, cookie: string, init: RequestInit = {}) => fetch(url, { ...init, headers: { ...(init.method === 'POST' ? { origin: new URL(url).origin } : {}), ...init.headers, cookie } });
 
 describe('P-009A local authentication and student session foundation', () => {
   it('has no fixed local-student application authority and fails unauthenticated access safely', async () => {
@@ -37,7 +38,7 @@ describe('P-009A local authentication and student session foundation', () => {
     const origin = await runningServer();
     const page = await fetch(origin, { redirect: 'manual' });
     const api = await fetch(`${origin}/api/student`);
-    const action = await fetch(`${origin}/action`, { method: 'POST', body: new URLSearchParams() });
+    const action = await fetch(`${origin}/action`, { method: 'POST', headers: { origin }, body: new URLSearchParams() });
     expect(page.status).toBe(401);
     expect(await page.text()).toContain('Local development sign in');
     expect(api.status).toBe(401);
@@ -51,6 +52,8 @@ describe('P-009A local authentication and student session foundation', () => {
     const second = await login(origin, 'STUDENT_B');
     expect(first.response.status).toBe(303);
     expect(first.response.headers.get('set-cookie')).toMatch(/HttpOnly; SameSite=Strict; Path=\/; Max-Age=28800/);
+    expect(first.response.headers.get('set-cookie')).not.toContain('student-a');
+    expect(first.cookie.split('=')[1]).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(first.cookie).not.toBe(second.cookie);
 
     expect((await authenticated(origin, first.cookie)).status).toBe(200);
@@ -103,6 +106,12 @@ describe('P-009A local authentication and student session foundation', () => {
     expect(foreignAction.status).toBe(404);
     expect(absentAction.status).toBe(404);
     expect(await foreignAction.text()).toBe(await absentAction.text());
+
+    const resetBody = (attemptId: string) => new URLSearchParams({ attemptId, screen: 'history', intent: 'reset-attempt' });
+    const foreignReset = await authenticated(`${origin}/action`, second.cookie, { method: 'POST', body: resetBody(firstModel.shell.attemptId) });
+    const absentReset = await authenticated(`${origin}/action`, second.cookie, { method: 'POST', body: resetBody(nonexistent) });
+    expect(foreignReset.status).toBe(404);
+    expect(await foreignReset.text()).toBe(await absentReset.text());
   }, 60_000);
 
   it('does not let browser-controlled identity values override the authenticated principal', async () => {
@@ -117,27 +126,78 @@ describe('P-009A local authentication and student session foundation', () => {
     expect((await spoofed.json()).shell.attemptId).toBe('student-b-suncoast-1');
     expect((await authenticated(`${origin}/?attempt=${firstModel.shell.attemptId}&studentId=student-a`, second.cookie)).status).toBe(404);
     expect((await fetch(`${origin}/api/student`, { headers: { cookie: 'bbb_student_session=student-a' } })).status).toBe(401);
-    const invalidProfile = await fetch(`${origin}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'profile=NOT_A_PROFILE&studentId=student-a' });
+    expect((await fetch(`${origin}/api/student`, { headers: { cookie: 'bbb_student_session=%%%malformed', 'x-student-id': 'student-a' } })).status).toBe(401);
+    const invalidProfile = await fetch(`${origin}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin }, body: 'profile=NOT_A_PROFILE&studentId=student-a' });
     expect(invalidProfile.status).toBe(404);
+
+    const fixation = await fetch(`${origin}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: 'bbb_student_session=attacker-selected', origin }, body: 'profile=STUDENT_A' });
+    expect(fixation.headers.get('set-cookie')).not.toContain('attacker-selected');
+    expect((await fetch(`${origin}/api/student`, { headers: { cookie: 'bbb_student_session=attacker-selected' } })).status).toBe(401);
   });
 
   it('clears authenticated access on logout and disables the fictional selector in production mode', async () => {
     const origin = await runningServer();
     const session = await login(origin, 'STUDENT_A');
     await authenticated(origin, session.cookie);
-    const replacement = await fetch(`${origin}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: session.cookie }, body: 'profile=STUDENT_B' });
+    const replacement = await fetch(`${origin}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: session.cookie, origin }, body: 'profile=STUDENT_B' });
     const replacementCookie = replacement.headers.get('set-cookie')!.split(';')[0];
     expect((await authenticated(`${origin}/api/student`, session.cookie)).status).toBe(401);
     await authenticated(origin, replacementCookie);
     expect((await (await authenticated(`${origin}/api/student`, replacementCookie)).json()).shell.attemptId).toBe('student-b-suncoast-1');
+    expect((await authenticated(`${origin}/?attempt=student-a-suncoast-1`, replacementCookie)).status).toBe(404);
     const logout = await authenticated(`${origin}/auth/logout`, replacementCookie, { method: 'POST', redirect: 'manual' });
     expect(logout.status).toBe(303);
     expect(logout.headers.get('set-cookie')).toMatch(/Max-Age=0/);
     expect((await authenticated(`${origin}/api/student`, replacementCookie)).status).toBe(401);
 
-    const productionOrigin = await runningServer({ localAuthenticationEnabled: false });
+    const productionOrigin = await runningServer({ productionMode: true });
     expect((await fetch(`${productionOrigin}/login`)).status).toBe(401);
-    expect((await fetch(`${productionOrigin}/auth/login`, { method: 'POST', body: 'profile=STUDENT_A' })).status).toBe(401);
+    expect((await fetch(`${productionOrigin}/auth/login`, { method: 'POST', headers: { origin: productionOrigin }, body: 'profile=STUDENT_A' })).status).toBe(403);
     expect(await (await fetch(productionOrigin)).text()).not.toContain('Student A');
+
+    const noOptInOrigin = await runningServer({ localAuthenticationEnabled: false });
+    expect((await fetch(`${noOptInOrigin}/login`)).status).toBe(401);
+    expect(await (await fetch(noOptInOrigin)).text()).not.toContain('Student A');
+  });
+
+  it('rejects missing and foreign origins before any cookie-authenticated mutation', async () => {
+    const origin = await runningServer();
+    expect((await fetch(`${origin}/auth/login`, { method: 'POST', body: 'profile=STUDENT_A' })).status).toBe(403);
+    expect((await fetch(`${origin}/auth/login`, { method: 'POST', headers: { origin: 'http://attacker.example' }, body: 'profile=STUDENT_A' })).status).toBe(403);
+    const session = await login(origin, 'STUDENT_A');
+    await authenticated(origin, session.cookie);
+    const before = await (await authenticated(`${origin}/api/student`, session.cookie)).json();
+    const body = new URLSearchParams({ attemptId: before.shell.attemptId, screen: 'bank', intent: 'review', targetId: before.data.bankEntries[0].id, revision: '0', key: 'csrf-review' });
+    const missing = await fetch(`${origin}/action`, { method: 'POST', headers: { cookie: session.cookie }, body });
+    const foreign = await fetch(`${origin}/action`, { method: 'POST', headers: { cookie: session.cookie, origin: 'http://attacker.example' }, body });
+    expect(missing.status).toBe(403);
+    expect(foreign.status).toBe(403);
+    expect((await (await authenticated(`${origin}/api/student`, session.cookie)).json()).shell.revision).toBe(0);
+  });
+
+  it('enforces server-side expiry, revoked replay failure, and secure-cookie policy', async () => {
+    let now = 1_000;
+    const localAuthenticator = new InMemoryStudentSessionAuthenticator({ now: () => now });
+    const origin = await runningServer({ localAuthenticator });
+    const session = await login(origin, 'STUDENT_A');
+    await authenticated(origin, session.cookie);
+    now += 28_800_001;
+    expect((await authenticated(`${origin}/api/student`, session.cookie)).status).toBe(401);
+    expect((await authenticated(`${origin}/api/student`, session.cookie)).status).toBe(401);
+
+    const secureOrigin = await runningServer({ allowedOrigin: 'https://lab.example', secureCookies: true });
+    const secureLogin = await fetch(`${secureOrigin}/auth/login`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://lab.example' }, body: 'profile=STUDENT_A' });
+    expect(secureLogin.headers.get('set-cookie')).toMatch(/; Secure$/);
+  });
+
+  it('keeps the application provider-neutral while local identities remain disabled', async () => {
+    const authenticator = { authenticate: () => ({ subject: 'provider|opaque-subject', studentId: 'provider-student', displayName: 'Provider Student' }) };
+    const origin = await runningServer({ authenticator, localAuthenticationEnabled: false });
+    const root = await fetch(origin);
+    expect(root.status).toBe(200);
+    expect(await root.text()).toContain('provider-student-suncoast-1');
+    const login = await fetch(`${origin}/login`);
+    expect(login.status).toBe(200);
+    expect(await login.text()).not.toContain('Student A');
   });
 });
