@@ -4,6 +4,8 @@ import { StudentApplication, type StudentAction } from '../apps/student/applicat
 import { renderStudentApplication } from '../apps/web/student-ui.js';
 import { narrowLayoutCss } from '../apps/web/narrow-layout.js';
 import type { StudentBookkeepingCommand } from '../packages/accounting-domain/src/suncoast-commands.js';
+import { PrismaClient } from '@prisma/client';
+import { PrismaStudentAttemptRepository } from '../apps/student/persistence.js';
 
 const auth = { studentId: 'student-a' } as const;
 const amount = (entry: { lines: readonly { debit: { cents: number }; credit: { cents: number } }[] }) => entry.lines.reduce((sum, line) => sum + line.debit.cents + line.credit.cents, 0) / 2;
@@ -83,7 +85,7 @@ describe('P-009 student application shell', () => {
 
 describe('P-009 protected application reachability', () => {
   it('reaches Results from the P-002 state using only student-visible application adapters', async () => {
-    const app = new StudentApplication(); let model = await app.start(auth); const attemptId = model.shell.attemptId;
+    const prisma=process.env.DATABASE_URL?new PrismaClient():undefined;const auth=prisma?{studentId:`d000-e2e-${Date.now()}`}:{studentId:'student-a'};const app = prisma?new StudentApplication(new PrismaStudentAttemptRepository(prisma)):new StudentApplication(); let model = await app.start(auth); const attemptId = model.shell.attemptId;
     const run = async (action: StudentAction) => { const result = await app.act(auth, attemptId, action); expect(result, `${action.type}: ${'command' in action ? action.command.type : ''} — ${result.message}`).toMatchObject({ ok: true }); model = await app.view(auth, { attemptId, screen: 'dashboard' }); };
     const command = async (value: StudentBookkeepingCommand) => run({ type: 'BOOKKEEPING', command: value, context: { expectedRevision: model.shell.revision, idempotencyKey: `p009-${model.shell.revision + 1}`, help: 'INDEPENDENT' } });
     const saveCorrection = async (entryId: string) => run({ type: 'SAVE_CORRECTION', entryId, context: { expectedRevision: model.shell.revision, idempotencyKey: `p009-${model.shell.revision + 1}`, help: 'INDEPENDENT' } });
@@ -123,6 +125,6 @@ describe('P-009 protected application reachability', () => {
     await run({ type: 'SUBMIT_EXPLANATION', explanation: "June revenue was $43,000, up from May's $38,750 and April's $33,700. June net income was $25,365.28 after $17,634.72 of expenses. Checking is $84,422, but cash is not the same as profit. Jenkins owes $1,425 and Reynolds owes $2,275, so those receivables need follow-up. The Visa balance is $4,308.15 and the vehicle loan is $27,910; the books show those balances, but they do not establish that the debt is a problem." });
     model = await app.view(auth, { attemptId, screen: 'meeting' }); for (const followUp of model.data.meeting!.followUps ?? []) await run({ type: 'ANSWER_FOLLOW_UP', followUpId: followUp.id, response: 'The books support follow-up, but they do not justify a guarantee or unsupported conclusion.' });
     await run({ type: 'FINALIZE_RESULTS' }); const results = await app.view(auth, { attemptId, screen: 'results' }); expect(results.data.results?.header.title).toBe('Are You Really Ready for Clients?'); expect(results.shell.attemptStatus).toBe('COMPLETED');
-    const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.history[0]).toMatchObject({ status: 'COMPLETED', hasResults: true }); expect(next.shell.attemptNumber).toBe(2);
-  }, 60_000);
+    const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.history[0]).toMatchObject({ status: 'COMPLETED', hasResults: true }); expect(next.shell.attemptNumber).toBe(2);await prisma?.$disconnect();
+  }, 180_000);
 });

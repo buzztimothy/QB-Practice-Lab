@@ -81,6 +81,8 @@ const criticalHooks: Readonly<Record<string, string>> = Object.freeze({
   HOME_DEPOT_SUPPORTED_REMOVED: 'SUN-L1-02', CPA_HISTORY_ALTERED: 'SUN-L1-10', ABC_CLASSIFICATION_GUESSED: 'SUN-L1-06', JENKINS_RECEIVABLE_REMOVED: 'SUN-L1-09', UNAPPLIED_AMOUNT_DISPOSED: 'SUN-L1-18', RECONCILIATION_ADJUSTMENT_FORCED: 'SUN-L1-20', PALM_BREEZE_RECEIPT_REMOVED: 'SUN-L1-19', UNVERIFIED_STATEMENTS_PRESENTED_FINAL: 'SUN-L1-20',
 });
 
+export function canonicalAssessmentDefinition() { return Object.freeze({rubricVersion:LAB1_READINESS_RUBRIC,competencyWeights,totalRubricPoints,scenarioRules,criticalHooks}); }
+
 const helpState = (level?: HelpLevel): HelpState => level === 'HINT' ? 'HINT_USED' : level === 'DIRECTION' ? 'DIRECTION_USED' : level === 'WALKTHROUGH' ? 'WALKTHROUGH_USED' : 'INDEPENDENT';
 const deepFreeze = <T>(value: T): T => {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) { Object.freeze(value); for (const item of Object.values(value)) deepFreeze(item); }

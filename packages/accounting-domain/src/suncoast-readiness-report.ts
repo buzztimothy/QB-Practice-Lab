@@ -17,6 +17,8 @@ const generatedAt = (version: number) => `2026-07-08T15:${String(version).padSta
 const displayNames: Readonly<Record<Competency, string>> = Object.freeze({ TECHNICAL_BOOKKEEPING: 'Technical Bookkeeping', INVESTIGATION_PROBLEM_SOLVING: 'Investigation & Problem Solving', PROFESSIONAL_JUDGMENT: 'Professional Judgment', CLIENT_COMMUNICATION: 'Client Communication', MONTH_END_FINANCIAL_EXPLANATION: 'Month-End Financial Explanation' });
 const displayClassifications: Readonly<Record<ReadinessClassification, string>> = Object.freeze({ CLIENT_READY: 'Client Ready', CLIENT_READY_WITH_SUPPORT: 'Client Ready With Support', MORE_PRACTICE_NEEDED: 'More Practice Recommended', RETURN_TO_LAB: 'Return to the Practice Lab', INCOMPLETE: 'Assessment Incomplete', REQUIRES_REVIEW: 'BBB Review Required' });
 
+export function canonicalReadinessReportDefinition() { return Object.freeze({displayNames,displayClassifications,brand:'BBB Client Practice Lab',title:'Are You Really Ready for Clients?',caseName:'Suncoast Home Services LLC',totalRubricPoints}); }
+
 export function competencyLabel(result: CompetencyResult): CompetencyLabel {
   if (result.status === 'NOT_ASSESSED' || result.earnedPoints === null) return 'NOT_ASSESSED';
   const percent = result.availablePoints === 0 ? 0 : result.earnedPoints * 100 / result.availablePoints;

@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import type { PrismaClient } from '@prisma/client';
 import type { IncomingMessage } from 'node:http';
 
 export interface AuthenticatedStudentPrincipal {
@@ -8,7 +10,13 @@ export interface AuthenticatedStudentPrincipal {
 }
 
 export interface StudentSessionAuthenticator {
-  authenticate(request: IncomingMessage): AuthenticatedStudentPrincipal | null;
+  authenticate(request: IncomingMessage): AuthenticatedStudentPrincipal | null | Promise<AuthenticatedStudentPrincipal | null>;
+}
+
+export interface LocalStudentSessionAuthenticator extends StudentSessionAuthenticator {
+  replace(request:IncomingMessage,profileKey:string,secure?:boolean):Promise<{readonly principal:AuthenticatedStudentPrincipal;readonly cookie:string}|null>;
+  destroy(request:IncomingMessage):Promise<void>;
+  clearCookie():string;
 }
 
 export interface LocalDevelopmentProfile {
@@ -48,7 +56,7 @@ export class InMemoryStudentSessionAuthenticator implements StudentSessionAuthen
     this.token = options.token ?? (() => randomBytes(32).toString('base64url'));
   }
 
-  authenticate(request: IncomingMessage) {
+  async authenticate(request: IncomingMessage) {
     const token = cookieValue(request, studentSessionCookie);
     const session = token ? this.sessions.get(token) : undefined;
     if (!session) return null;
@@ -59,7 +67,7 @@ export class InMemoryStudentSessionAuthenticator implements StudentSessionAuthen
     return session.principal;
   }
 
-  create(profileKey: string, secure = false) {
+  async create(profileKey: string, secure = false) {
     const profile = localDevelopmentProfiles.find(item => item.key === profileKey);
     if (!profile) return null;
     let token = this.token();
@@ -68,12 +76,12 @@ export class InMemoryStudentSessionAuthenticator implements StudentSessionAuthen
     return Object.freeze({ principal: profile.principal, cookie: `${studentSessionCookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secure ? '; Secure' : ''}` });
   }
 
-  replace(request: IncomingMessage, profileKey: string, secure = false) {
-    this.destroy(request);
+  async replace(request: IncomingMessage, profileKey: string, secure = false) {
+    await this.destroy(request);
     return this.create(profileKey, secure);
   }
 
-  destroy(request: IncomingMessage) {
+  async destroy(request: IncomingMessage) {
     const token = cookieValue(request, studentSessionCookie);
     if (token) this.sessions.delete(token);
   }
@@ -81,4 +89,16 @@ export class InMemoryStudentSessionAuthenticator implements StudentSessionAuthen
   clearCookie() {
     return `${studentSessionCookie}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
   }
+}
+
+const hashToken=(token:string)=>createHash('sha256').update(token).digest('hex');
+
+export class PrismaStudentSessionAuthenticator implements LocalStudentSessionAuthenticator {
+  private readonly now:()=>number;private readonly token:()=>string;
+  constructor(private readonly prisma:PrismaClient,options:InMemoryStudentSessionOptions={}){this.now=options.now??Date.now;this.token=options.token??(()=>randomBytes(32).toString('base64url'));}
+  async authenticate(request:IncomingMessage){const token=cookieValue(request,studentSessionCookie);if(!token)return null;const session=await this.prisma.studentSession.findUnique({where:{tokenHash:hashToken(token)}});if(!session||session.revokedAt||session.expiresAt.getTime()<=this.now())return null;return Object.freeze({subject:session.subject,studentId:session.studentId,displayName:session.displayName});}
+  async create(profileKey:string,secure=false){const profile=localDevelopmentProfiles.find(item=>item.key===profileKey);if(!profile)return null;const token=this.token(),expiresAt=new Date(this.now()+28_800_000);await this.prisma.$transaction(async tx=>{await tx.runtimeStudent.upsert({where:{id:profile.principal.studentId},create:{id:profile.principal.studentId,displayName:profile.principal.displayName},update:{displayName:profile.principal.displayName}});await tx.studentSession.create({data:{tokenHash:hashToken(token),studentId:profile.principal.studentId,subject:profile.principal.subject,displayName:profile.principal.displayName,expiresAt}});});return Object.freeze({principal:profile.principal,cookie:`${studentSessionCookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${secure?'; Secure':''}`});}
+  async replace(request:IncomingMessage,profileKey:string,secure=false){await this.destroy(request);return this.create(profileKey,secure);}
+  async destroy(request:IncomingMessage){const token=cookieValue(request,studentSessionCookie);if(token)await this.prisma.studentSession.updateMany({where:{tokenHash:hashToken(token),revokedAt:null},data:{revokedAt:new Date(this.now())}});}
+  clearCookie(){return `${studentSessionCookie}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;}
 }

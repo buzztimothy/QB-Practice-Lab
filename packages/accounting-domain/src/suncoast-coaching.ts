@@ -159,6 +159,12 @@ function createRecord(value: SuncoastCoachingAttempt, messageId: string, mode: C
   return freezeAttempt({ ...value, records: [...value.records, record], audit: [...value.audit, audit] });
 }
 
+export function canonicalCoachingDefinition() {
+  const situations: readonly CoachingSituation[] = ['COACH-01','COACH-02','COACH-03','COACH-04','COACH-05','COACH-06','COACH-07','COACH-08','ANSWER_BOUNDARY','GENERAL'];
+  const levels: readonly HelpLevel[] = ['HINT','DIRECTION','WALKTHROUGH'];
+  return Object.freeze({rules:Object.freeze(rules.map(rule=>Object.freeze({situation:rule.situation,mode:rule.mode}))),content:Object.freeze(situations.flatMap(situation=>levels.map(level=>Object.freeze({situation,level,content:coachingContent(situation,level)})))),dimensionProbes:Object.freeze(situations.map(situation=>Object.freeze({situation,dimensions:dimensionsFor(situation,'Please confirm the supporting documentation before I classify this transaction.')})))});
+}
+
 export async function deriveSuncoastCoaching(studentId: string, attemptId: string, generation = 1): Promise<SuncoastCoachingAttempt> {
   return freezeAttempt({ attemptId, studentId, generation, interaction: await deriveSuncoastInteraction(studentId, attemptId, generation), records: [], audit: [] });
 }

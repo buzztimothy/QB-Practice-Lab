@@ -2,7 +2,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { StudentApplication, studentScreens, type StudentAction, type StudentScreen } from '../student/application.js';
 import { studentCss, studentJs, renderStudentApplication } from './student-ui.js';
 import { narrowLayoutCss } from './narrow-layout.js';
-import { InMemoryStudentSessionAuthenticator, localDevelopmentProfiles, type StudentSessionAuthenticator } from './authentication.js';
+import { InMemoryStudentSessionAuthenticator, localDevelopmentProfiles, type LocalStudentSessionAuthenticator, type StudentSessionAuthenticator } from './authentication.js';
+import { PrismaClient } from '@prisma/client';
+import { PrismaStudentAttemptRepository } from '../student/persistence.js';
+import { PrismaStudentSessionAuthenticator } from './authentication.js';
 
 const readBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return new URLSearchParams(Buffer.concat(chunks).toString('utf8')); };
 const string = (body: URLSearchParams, key: string) => body.get(key) ?? '';
@@ -47,7 +50,7 @@ const loginPage = () => `<!doctype html><html lang="en"><head><meta charset="utf
 export interface StudentWebServerOptions {
   readonly application?: StudentApplication;
   readonly authenticator?: StudentSessionAuthenticator;
-  readonly localAuthenticator?: InMemoryStudentSessionAuthenticator;
+  readonly localAuthenticator?: LocalStudentSessionAuthenticator;
   readonly localAuthenticationEnabled?: boolean;
   readonly productionMode?: boolean;
   readonly allowedOrigin?: string;
@@ -70,14 +73,17 @@ function originAllowed(request: IncomingMessage, url: URL) {
 
 async function page(request: IncomingMessage, response: ServerResponse) {
   const url=new URL(request.url??'/',`http://${request.headers.host??'localhost'}`);
+  if(url.pathname==='/health/live'){response.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});response.end(JSON.stringify({status:'alive'}));return;}
+  if(url.pathname==='/health/ready'){const ready=await application.isReady();response.writeHead(ready?200:503,{'content-type':'application/json','cache-control':'no-store'});response.end(JSON.stringify({status:ready?'ready':'unavailable'}));return;}
+  if(!(await application.isReady())){response.writeHead(503,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}
   if(url.pathname==='/assets/student.css'){response.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});response.end(studentCss+narrowLayoutCss);return;}
   if(url.pathname==='/assets/student.js'){response.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});response.end(studentJs);return;}
   if(url.pathname==='/login'&&request.method==='GET'&&localAuthenticationEnabled){response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(loginPage());return;}
   const protectedPost=request.method==='POST'&&['/auth/login','/auth/logout','/action'].includes(url.pathname);
   if(protectedPost&&!originAllowed(request,url)){response.writeHead(403,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(forbidden);return;}
-  if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=localAuthenticator.replace(request,string(body,'profile'),secureCookies);if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
-  if(url.pathname==='/auth/logout'&&request.method==='POST'&&localAuthenticationEnabled){localAuthenticator.destroy(request);response.writeHead(303,{location:'/login','set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store'});response.end();return;}
-  const auth=authenticator.authenticate(request);
+  if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=await localAuthenticator.replace(request,string(body,'profile'),secureCookies);if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
+  if(url.pathname==='/auth/logout'&&request.method==='POST'&&localAuthenticationEnabled){await localAuthenticator.destroy(request);response.writeHead(303,{location:'/login','set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store'});response.end();return;}
+  const auth=await authenticator.authenticate(request);
   if(!auth){const json=url.pathname==='/api/student';response.writeHead(401,{'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(json?JSON.stringify({error:'Authentication required'}):localAuthenticationEnabled?loginPage():unavailable);return;}
   if(request.method==='POST'&&url.pathname==='/action'){
     const body=await readBody(request),attemptId=string(body,'attemptId'),screen=(string(body,'screen')||'dashboard') as StudentScreen;
@@ -95,5 +101,10 @@ async function page(request: IncomingMessage, response: ServerResponse) {
   return createServer((request,response)=>{page(request,response).catch(()=>{response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);});});
 }
 
-export const studentWebServer=createStudentWebServer();
+const durableRuntimeEnabled=process.env.DURABLE_RUNTIME_ENABLED==='true';
+if(process.env.NODE_ENV==='production'&&!durableRuntimeEnabled)throw new Error('Production requires durable runtime');
+const runtimePrisma=durableRuntimeEnabled?new PrismaClient():undefined;
+const runtimeApplication=runtimePrisma?new StudentApplication(new PrismaStudentAttemptRepository(runtimePrisma)):undefined;
+const runtimeAuthenticator=runtimePrisma?new PrismaStudentSessionAuthenticator(runtimePrisma):undefined;
+export const studentWebServer=createStudentWebServer({application:runtimeApplication,authenticator:runtimeAuthenticator,localAuthenticator:runtimeAuthenticator});
 if(process.env.NODE_ENV!=='test')studentWebServer.listen(Number(process.env.WEB_PORT??3000));
