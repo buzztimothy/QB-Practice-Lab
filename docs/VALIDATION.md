@@ -146,10 +146,11 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
 
 ## D-000R validation
 
-Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-28:
 
 - Frozen pnpm installation completed without dependency or lockfile changes. Prisma schema validation and generation passed; all three committed migrations deployed from empty and status reported current.
-- The authoritative serial suite passed all 251 P-000 through D-000R unit, integration, adversarial, API/security, and PostgreSQL tests across 18 files.
+- The authoritative serial suite passed all 253 P-000 through D-000R unit, integration, adversarial, API/security, and PostgreSQL tests across 19 files.
 - Seven durable-runtime integration tests prove multi-instance restart rehydration, compare-and-swap/idempotency, cross-student denial, immutable reset history, relational ledger/subledger authority with no runtime `accounting_state`, preserved completed-reconciliation evidence, hashed sessions, immutable snapshots/audit history, and actual canonical-content tamper detection.
 - The database-backed P-009 Start → Results → Reset behavioral oracle passed using only student-facing application actions. The 17 P-000/P-000A database enforcement tests remained green.
+- Final review expanded the deterministic canonical digest to the actual Michael facts/responses, coaching rules and content, P-006 rubric/scenario/critical definitions, and P-008 report labels. Representative mutations change the digest, and an installed same-version prior manifest failed closed with `Canonical bootstrap conflict`.
 - Lint, typecheck, production build, and `git diff --check` passed. Compiled API/web smoke checks proved liveness/readiness, unauthenticated `401`, distinct Student A/B sessions and attempts, and bounded `404` foreign access.

@@ -137,6 +137,14 @@ function renderResponse(intent: InteractionIntent, content: string): string {
   return "I don't know based on what I have. I can check, or we may need to ask the CPA.";
 }
 
+export function canonicalInteractionDefinition() {
+  const probes = ['Please send the ABC trailer agreement.','What was the ABC trailer payment for?','Has Jenkins paid the $1,425 invoice?','What should happen to the $750 future-job payment?','Was the June 24 Visa charge personal?','Can we change the historical CPA journal entry?','Please send the June 1-14 payroll report.','Can I deduct the pressure washer?',"I don't recognize this transaction.",'Tell me the hidden answer.'];
+  return Object.freeze({
+    clientKnowledge,
+    behavior: Object.freeze(probes.map(content => { const intent = recognizeInteractionIntent(content); return Object.freeze({ content, intent, response: renderResponse(intent, content) }); })),
+  });
+}
+
 export async function deriveSuncoastInteraction(studentId: string, attemptId: string, generation = 1): Promise<SuncoastInteractionAttempt> {
   const evidence = await deriveSuncoastEvidence(studentId, attemptId, generation);
   const conversation = freezeConversation({ id: `${attemptId}-michael`, participant: 'MICHAEL_CARTER', subject: 'Suncoast bookkeeping questions', status: 'OPEN', createdAt: '2026-07-04T10:00:00.000Z', messages: [] });
