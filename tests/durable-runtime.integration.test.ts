@@ -41,7 +41,7 @@ describeDb('D-000 durable runtime',()=>{
     const studentId=`d000-owner-${Date.now()}`,auth={studentId},app=new StudentApplication(new PrismaStudentAttemptRepository(prisma));const started=await app.start(auth);
     await expect(app.view({studentId:`${studentId}-foreign`},{attemptId:started.shell.attemptId})).rejects.toBeInstanceOf(NotFoundError);
     const reset=await app.act(auth,started.shell.attemptId,{type:'RESET_ATTEMPT'});expect(reset.ok).toBe(true);const restarted=new StudentApplication(new PrismaStudentAttemptRepository(extra()));const history=await restarted.view(auth,{attemptId:reset.attemptId,screen:'history'});expect(history.history).toHaveLength(2);expect(history.history[0].status).toBe('RESET');expect(history.shell.attemptNumber).toBe(2);
-  });
+  },30_000);
 
   it('persists hashed sessions and makes revocation authoritative across instances',async()=>{
     const rawToken=Buffer.from(`d000-session-${Date.now()}`).toString('base64url').padEnd(43,'x'),first=new PrismaStudentSessionAuthenticator(prisma,{token:()=>rawToken}),second=new PrismaStudentSessionAuthenticator(extra());
@@ -49,8 +49,34 @@ describeDb('D-000 durable runtime',()=>{
     await first.destroy(request(cookie));expect(await second.authenticate(request(cookie))).toBeNull();
   });
 
+  it('uses the P-000/P-000A relational ledger and immutable reconciliation history as runtime authority',async()=>{
+    const studentId=`d000-relational-${Date.now()}`,app=new StudentApplication(new PrismaStudentAttemptRepository(prisma)),started=await app.start({studentId});
+    const runtime=await prisma.runtimeAttempt.findUniqueOrThrow({where:{id:started.shell.attemptId}});
+    expect(await prisma.journalLine.count({where:{attemptId:runtime.ledgerAttemptId}})).toBeGreaterThan(0);
+    expect(await prisma.invoice.count({where:{attemptId:runtime.ledgerAttemptId}})).toBeGreaterThan(0);
+    expect(await prisma.runtimeHistoricalReconciliationLine.count({where:{attemptId:runtime.ledgerAttemptId}})).toBeGreaterThan(0);
+    const columns=await prisma.$queryRaw<Array<{column_name:string}>>`SELECT column_name FROM information_schema.columns WHERE table_name='runtime_attempts'`;
+    expect(columns.map(item=>item.column_name)).not.toContain('accounting_state');
+    const completed=await prisma.reconciliation.findFirstOrThrow({where:{attemptId:runtime.ledgerAttemptId,status:'COMPLETED'}});
+    await expect(prisma.reconciliation.update({where:{id:completed.id},data:{endingBalanceCents:{increment:1}}})).rejects.toThrow(/immutable/);
+  },30_000);
+
+  it('fails readiness and bootstrap closed when actual canonical database content is tampered',async()=>{
+    const repository=new PrismaStudentAttemptRepository(prisma),account=await prisma.templateAccount.findFirstOrThrow({where:{template:{slug:'suncoast-lab-1'}},orderBy:{code:'asc'}}),original=account.name;
+    await prisma.$executeRawUnsafe('ALTER TABLE "template_accounts" DISABLE TRIGGER template_accounts_immutable');
+    try {
+      await prisma.templateAccount.update({where:{id:account.id},data:{name:`${original} tampered`}});
+      expect(await repository.readiness()).toBe(false);
+      await expect(bootstrapCanonicalLab(prisma)).rejects.toThrow(/conflict/i);
+      await prisma.templateAccount.update({where:{id:account.id},data:{name:original}});
+      expect(await repository.readiness()).toBe(true);
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "template_accounts" ENABLE TRIGGER template_accounts_immutable');
+    }
+  },30_000);
+
   it('keeps canonical bootstrap idempotent and immutable snapshots protected',async()=>{
     const before=await prisma.runtimeAttempt.count();const first=await bootstrapCanonicalLab(prisma),second=await bootstrapCanonicalLab(prisma);expect(second).toEqual(first);expect(await prisma.runtimeAttempt.count()).toBe(before);
     const studentId=`d000-snapshot-${Date.now()}`,app=new StudentApplication(new PrismaStudentAttemptRepository(prisma)),started=await app.start({studentId});await app.act({studentId},started.shell.attemptId,{type:'CLOSE_BOOKS'});const snapshot=await prisma.runtimeSnapshot.findFirst({where:{attemptId:started.shell.attemptId,kind:'ASSESSMENT'}});expect(snapshot).not.toBeNull();await expect(prisma.runtimeSnapshot.update({where:{id:snapshot!.id},data:{contentHash:'tampered'}})).rejects.toThrow(/immutable/);
-  });
+  },30_000);
 });

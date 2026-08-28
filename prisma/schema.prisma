@@ -59,10 +59,12 @@ model TemplateCustomer {
   templateId String            @map("template_id") @db.Uuid
   name       String
   active     Boolean           @default(true)
+  runtimeKey String?           @map("runtime_key")
   template   CaseTemplate      @relation(fields: [templateId], references: [id], onDelete: Restrict)
   customers  AttemptCustomer[]
 
   @@unique([templateId, id])
+  @@unique([templateId, runtimeKey])
   @@map("template_customers")
 }
 
@@ -73,11 +75,13 @@ model TemplateAccount {
   name            String
   kind            AccountKind
   operationalRole OperationalAccountRole? @map("operational_role")
+  runtimeKey      String?          @map("runtime_key")
   template        CaseTemplate     @relation(fields: [templateId], references: [id], onDelete: Restrict)
   attemptAccounts AttemptAccount[]
 
   @@unique([templateId, id])
   @@unique([templateId, code])
+  @@unique([templateId, runtimeKey])
   @@map("template_accounts")
 }
 
@@ -88,9 +92,11 @@ model TemplateDocument {
   studentContent    Json         @map("student_content")
   instructorData    Json         @map("instructor_data")
   unlockAfterAction Int          @map("unlock_after_action")
+  runtimeKey        String?      @map("runtime_key")
   template          CaseTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
 
   @@unique([templateId, id])
+  @@unique([templateId, runtimeKey])
   @@map("template_documents")
 }
 
@@ -108,8 +114,10 @@ model StudentAttempt {
   customers  AttemptCustomer[]
   invoices   Invoice[]
   payments   CustomerPayment[]
+  applications PaymentApplication[]
   deposits   BankDeposit[]
   reconciliations Reconciliation[]
+  runtime     RuntimeAttempt?
 
   @@unique([studentId, templateId, generation])
   @@index([studentId, id])
@@ -122,25 +130,28 @@ model AttemptCustomer {
   sourceTemplateCustomerId String?           @map("source_template_customer_id") @db.Uuid
   name                     String
   active                   Boolean           @default(true)
+  runtimeKey               String?           @map("runtime_key")
   attempt                  StudentAttempt    @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   source                   TemplateCustomer? @relation(fields: [sourceTemplateCustomerId], references: [id], onDelete: Restrict)
   invoices                 Invoice[]
   payments                 CustomerPayment[]
 
   @@unique([attemptId, id])
+  @@unique([attemptId, runtimeKey])
   @@map("attempt_customers")
 }
 
 model AttemptAccount {
   id                      String          @id @default(uuid()) @db.Uuid
   attemptId               String          @map("attempt_id") @db.Uuid
-  sourceTemplateAccountId String          @map("source_template_account_id") @db.Uuid
+  sourceTemplateAccountId String?         @map("source_template_account_id") @db.Uuid
   code                    String
   name                    String
   kind                    AccountKind
   operationalRole         OperationalAccountRole? @map("operational_role")
+  runtimeKey              String?         @map("runtime_key")
   attempt                 StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  source                  TemplateAccount @relation(fields: [sourceTemplateAccountId], references: [id], onDelete: Restrict)
+  source                  TemplateAccount? @relation(fields: [sourceTemplateAccountId], references: [id], onDelete: Restrict)
   lines                   JournalLine[]
   invoiceLines            InvoiceLine[]
   invoiceAr               Invoice[]       @relation("InvoiceArAccount")
@@ -151,6 +162,7 @@ model AttemptAccount {
 
   @@unique([attemptId, id])
   @@unique([attemptId, code])
+  @@unique([attemptId, runtimeKey])
   @@map("attempt_accounts")
 }
 
@@ -164,11 +176,14 @@ model JournalEntry {
   lines       JournalLine[]
   sourceType  String?        @map("source_type")
   sourceId    String?        @map("source_id") @db.Uuid
+  runtimeKey  String?        @map("runtime_key")
+  runtimeSourceId String?    @map("runtime_source_id")
   invoices    Invoice[]
   payments    CustomerPayment[]
   deposits    BankDeposit[]
 
   @@unique([attemptId, id])
+  @@unique([attemptId, runtimeKey])
   @@map("journal_entries")
 }
 
@@ -182,6 +197,7 @@ model Invoice {
   invoiceDate     DateTime        @map("invoice_date") @db.Date
   dueDate         DateTime        @map("due_date") @db.Date
   status          InvoiceStatus   @default(OPEN)
+  runtimeKey      String?         @map("runtime_key")
   attempt         StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   customer        AttemptCustomer @relation(fields: [attemptId, customerId], references: [attemptId, id], onDelete: Restrict)
   arAccount       AttemptAccount  @relation("InvoiceArAccount", fields: [attemptId, arAccountId], references: [attemptId, id], onDelete: Restrict)
@@ -191,6 +207,7 @@ model Invoice {
 
   @@unique([attemptId, id])
   @@unique([attemptId, number])
+  @@unique([attemptId, runtimeKey])
   @@map("invoices")
 }
 
@@ -201,9 +218,11 @@ model InvoiceLine {
   revenueAccountId String         @map("revenue_account_id") @db.Uuid
   description      String
   amountCents      BigInt         @map("amount_cents")
+  runtimeKey       String?        @map("runtime_key")
   invoice          Invoice        @relation(fields: [attemptId, invoiceId], references: [attemptId, id], onDelete: Cascade)
   revenueAccount   AttemptAccount @relation(fields: [attemptId, revenueAccountId], references: [attemptId, id], onDelete: Restrict)
 
+  @@unique([attemptId, runtimeKey])
   @@map("invoice_lines")
 }
 
@@ -218,6 +237,7 @@ model CustomerPayment {
   amountCents          BigInt          @map("amount_cents")
   method               String?
   reference            String?
+  runtimeKey           String?         @map("runtime_key")
   attempt              StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   customer             AttemptCustomer @relation(fields: [attemptId, customerId], references: [attemptId, id], onDelete: Restrict)
   destinationAccount   AttemptAccount  @relation("PaymentDestination", fields: [attemptId, destinationAccountId], references: [attemptId, id], onDelete: Restrict)
@@ -227,6 +247,7 @@ model CustomerPayment {
   depositLinks         BankDepositPayment[]
 
   @@unique([attemptId, id])
+  @@unique([attemptId, runtimeKey])
   @@map("customer_payments")
 }
 
@@ -237,9 +258,12 @@ model PaymentApplication {
   invoiceId   String          @map("invoice_id") @db.Uuid
   amountCents BigInt          @map("amount_cents")
   appliedAt   DateTime        @default(now()) @map("applied_at")
+  runtimeKey  String?         @map("runtime_key")
+  attempt     StudentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   payment     CustomerPayment @relation(fields: [attemptId, paymentId], references: [attemptId, id], onDelete: Cascade)
   invoice     Invoice         @relation(fields: [attemptId, invoiceId], references: [attemptId, id], onDelete: Cascade)
 
+  @@unique([attemptId, runtimeKey])
   @@map("payment_applications")
 }
 
@@ -250,12 +274,14 @@ model BankDeposit {
   journalEntryId String               @map("journal_entry_id") @db.Uuid
   depositDate    DateTime             @map("deposit_date") @db.Date
   amountCents    BigInt               @map("amount_cents")
+  runtimeKey     String?              @map("runtime_key")
   attempt        StudentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   bankAccount    AttemptAccount       @relation(fields: [attemptId, bankAccountId], references: [attemptId, id], onDelete: Restrict)
   journalEntry   JournalEntry         @relation(fields: [attemptId, journalEntryId], references: [attemptId, id], onDelete: Restrict)
   paymentLinks   BankDepositPayment[]
 
   @@unique([attemptId, id])
+  @@unique([attemptId, runtimeKey])
   @@map("bank_deposits")
 }
 
@@ -281,11 +307,14 @@ model Reconciliation {
   endingBalanceCents    BigInt               @map("ending_balance_cents")
   status                ReconciliationStatus @default(IN_PROGRESS)
   completedAt           DateTime?            @map("completed_at")
+  runtimeKey            String?              @map("runtime_key")
   attempt               StudentAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   account               AttemptAccount       @relation(fields: [attemptId, accountId], references: [attemptId, id], onDelete: Restrict)
   clearedLines          ReconciliationLine[]
+  historicalLines       RuntimeHistoricalReconciliationLine[]
 
   @@unique([attemptId, id])
+  @@unique([attemptId, runtimeKey])
   @@map("reconciliations")
 }
 
@@ -307,10 +336,12 @@ model JournalLine {
   attemptAccountId String         @map("attempt_account_id") @db.Uuid
   debitCents       BigInt         @default(0) @map("debit_cents")
   creditCents      BigInt         @default(0) @map("credit_cents")
+  runtimeKey       String?        @map("runtime_key")
   entry            JournalEntry   @relation(fields: [attemptId, entryId], references: [attemptId, id], onDelete: Cascade)
   account          AttemptAccount @relation(fields: [attemptId, attemptAccountId], references: [attemptId, id], onDelete: Restrict)
 
   @@index([entryId])
+  @@unique([attemptId, runtimeKey])
   @@map("journal_lines")
 }
 
@@ -325,6 +356,21 @@ model AttemptAction {
 
   @@unique([attemptId, sequence])
   @@map("attempt_actions")
+}
+
+model RuntimeHistoricalReconciliationLine {
+  id               String         @id @default(uuid()) @db.Uuid
+  attemptId        String         @map("attempt_id") @db.Uuid
+  reconciliationId String         @map("reconciliation_id") @db.Uuid
+  runtimeLineKey   String         @map("runtime_line_key")
+  attemptAccountId String         @map("attempt_account_id") @db.Uuid
+  debitCents       BigInt         @map("debit_cents")
+  creditCents      BigInt         @map("credit_cents")
+  fingerprint      String
+  reconciliation   Reconciliation @relation(fields: [attemptId, reconciliationId], references: [attemptId, id], onDelete: Cascade)
+
+  @@unique([attemptId, reconciliationId, runtimeLineKey])
+  @@map("runtime_historical_reconciliation_lines")
 }
 
 model RuntimeStudent {
@@ -359,12 +405,14 @@ model ExternalIdentityLink {
 model RuntimeAttempt {
   id                 String               @id
   studentId          String               @map("student_id")
+  ledgerAttemptId    String               @unique @map("ledger_attempt_id") @db.Uuid
   labVersion         String               @map("lab_version")
   generation         Int
   status             String
   revision           Int                  @default(0)
   persistenceVersion Int                  @default(0) @map("persistence_version")
-  accountingState    Json                 @map("accounting_state")
+  accountingDigest   String               @map("accounting_digest")
+  p002MetadataState  Json                 @map("p002_metadata_state")
   evidenceState      Json                 @map("evidence_state")
   interactionState   Json                 @map("interaction_state")
   coachingState      Json                 @map("coaching_state")
@@ -374,12 +422,27 @@ model RuntimeAttempt {
   createdAt          DateTime             @default(now()) @map("created_at")
   updatedAt          DateTime             @updatedAt @map("updated_at")
   student            RuntimeStudent       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  ledgerAttempt      StudentAttempt       @relation(fields: [ledgerAttemptId], references: [id], onDelete: Restrict)
   idempotency        RuntimeIdempotency[]
   snapshots          RuntimeSnapshot[]
+  auditEvents        RuntimeAuditEvent[]
 
   @@unique([studentId, labVersion, generation])
   @@index([studentId, status, generation])
   @@map("runtime_attempts")
+}
+
+model RuntimeAuditEvent {
+  id        String         @id @default(uuid()) @db.Uuid
+  attemptId String         @map("attempt_id")
+  sequence  Int
+  payload   Json
+  createdAt DateTime       @default(now()) @map("created_at")
+  attempt   RuntimeAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, sequence])
+  @@index([attemptId, sequence])
+  @@map("runtime_audit_events")
 }
 
 model RuntimeIdempotency {
@@ -434,6 +497,7 @@ model CanonicalLabBootstrap {
   version         String
   contentHash     String   @map("content_hash")
   contentManifest Json     @map("content_manifest")
+  databaseDigest  String   @map("database_digest")
   installedAt     DateTime @default(now()) @map("installed_at")
   verifiedAt      DateTime @default(now()) @map("verified_at")
 

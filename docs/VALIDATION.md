@@ -143,3 +143,13 @@ Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
 - P-009A coverage proves safe unauthenticated failure, two distinct opaque HttpOnly sessions and principals, refresh persistence, local session replacement and logout revocation, server-enforced expiry and replay denial, secure-cookie policy, explicit development opt-in, production disabling of the fictional selector, exact-Origin CSRF enforcement, browser-controlled spoof resistance, cross-student command/reset and copied-route denial, and identical foreign/nonexistent responses across attempt, transaction, document, conversation, coaching, meeting, and Results surfaces.
 - Final review corrected two security defects before merge: state-changing cookie-authenticated requests now fail closed without an exact allowed Origin, and the fictional local provider now requires explicit opt-in rather than activating whenever `NODE_ENV` is absent.
 - Lint, typecheck, production build, and `git diff --check` passed. Compiled API/web smoke checks proved API health, unauthenticated `401`, independent Student A and Student B attempts in separate cookie jars, and bounded `404` foreign access.
+
+## D-000R validation
+
+Validated against a fresh disposable PostgreSQL 16 database on 2026-08-27:
+
+- Frozen pnpm installation completed without dependency or lockfile changes. Prisma schema validation and generation passed; all three committed migrations deployed from empty and status reported current.
+- The authoritative serial suite passed all 251 P-000 through D-000R unit, integration, adversarial, API/security, and PostgreSQL tests across 18 files.
+- Seven durable-runtime integration tests prove multi-instance restart rehydration, compare-and-swap/idempotency, cross-student denial, immutable reset history, relational ledger/subledger authority with no runtime `accounting_state`, preserved completed-reconciliation evidence, hashed sessions, immutable snapshots/audit history, and actual canonical-content tamper detection.
+- The database-backed P-009 Start → Results → Reset behavioral oracle passed using only student-facing application actions. The 17 P-000/P-000A database enforcement tests remained green.
+- Lint, typecheck, production build, and `git diff --check` passed. Compiled API/web smoke checks proved liveness/readiness, unauthenticated `401`, distinct Student A/B sessions and attempts, and bounded `404` foreign access.

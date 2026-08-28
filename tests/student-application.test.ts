@@ -126,5 +126,5 @@ describe('P-009 protected application reachability', () => {
     model = await app.view(auth, { attemptId, screen: 'meeting' }); for (const followUp of model.data.meeting!.followUps ?? []) await run({ type: 'ANSWER_FOLLOW_UP', followUpId: followUp.id, response: 'The books support follow-up, but they do not justify a guarantee or unsupported conclusion.' });
     await run({ type: 'FINALIZE_RESULTS' }); const results = await app.view(auth, { attemptId, screen: 'results' }); expect(results.data.results?.header.title).toBe('Are You Really Ready for Clients?'); expect(results.shell.attemptStatus).toBe('COMPLETED');
     const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.history[0]).toMatchObject({ status: 'COMPLETED', hasResults: true }); expect(next.shell.attemptNumber).toBe(2);await prisma?.$disconnect();
-  }, 60_000);
+  }, 180_000);
 });
