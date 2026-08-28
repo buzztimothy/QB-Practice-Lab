@@ -39,6 +39,19 @@ enum ReconciliationStatus {
   COMPLETED
 }
 
+enum RuntimeStudentStatus {
+  INVITED
+  ACTIVE
+  DEACTIVATED
+}
+
+enum PreviewInvitationStatus {
+  PENDING
+  SENT
+  CONSUMED
+  REVOKED
+}
+
 model CaseTemplate {
   id              String             @id @default(uuid()) @db.Uuid
   slug            String             @unique
@@ -376,11 +389,14 @@ model RuntimeHistoricalReconciliationLine {
 model RuntimeStudent {
   id          String           @id
   displayName String           @map("display_name")
+  email       String?          @unique
+  status      RuntimeStudentStatus @default(ACTIVE)
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   attempts    RuntimeAttempt[]
   sessions    StudentSession[]
   identities  ExternalIdentityLink[]
+  invitations PreviewInvitation[]
 
   @@map("runtime_students")
 }
@@ -400,6 +416,35 @@ model ExternalIdentityLink {
   @@unique([provider, email])
   @@index([studentId, active])
   @@map("external_identity_links")
+}
+
+model PreviewInvitation {
+  id                   String                  @id @default(uuid()) @db.Uuid
+  studentId            String                  @map("student_id")
+  provider             String                  @default("clerk")
+  email                String
+  providerInvitationId String?                 @unique @map("provider_invitation_id")
+  status               PreviewInvitationStatus @default(PENDING)
+  consumedSubject      String?                 @map("consumed_subject")
+  consumedAt           DateTime?               @map("consumed_at")
+  createdAt            DateTime                @default(now()) @map("created_at")
+  updatedAt            DateTime                @updatedAt @map("updated_at")
+  student              RuntimeStudent          @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, email])
+  @@index([studentId, status])
+  @@map("preview_invitations")
+}
+
+model ProviderWebhookEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  provider        String
+  providerEventId String   @map("provider_event_id")
+  eventType       String   @map("event_type")
+  processedAt     DateTime @default(now()) @map("processed_at")
+
+  @@unique([provider, providerEventId])
+  @@map("provider_webhook_events")
 }
 
 model RuntimeAttempt {

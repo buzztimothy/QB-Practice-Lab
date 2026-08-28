@@ -5,8 +5,10 @@ import { NotFoundError } from '../packages/accounting-domain/src/errors.js';
 import { StudentApplication } from '../apps/student/application.js';
 import { bootstrapCanonicalLab, PrismaStudentAttemptRepository } from '../apps/student/persistence.js';
 import { PrismaStudentSessionAuthenticator } from '../apps/web/authentication.js';
+import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
 
 const url=process.env.DATABASE_URL;
+if(url)assertDisposableTestDatabase(url,process.env.DATABASE_LIFECYCLE_MARKER);
 const describeDb=url?describe:describe.skip;
 const prisma=new PrismaClient();
 const extraClients:PrismaClient[]=[];

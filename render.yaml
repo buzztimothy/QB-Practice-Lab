@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: bbb-practice-lab-preview
+    runtime: node
+    plan: starter
+    autoDeploy: false
+    buildCommand: pnpm install --frozen-lockfile && pnpm db:generate && pnpm build
+    startCommand: pnpm start:web
+    healthCheckPath: /health/ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DURABLE_RUNTIME_ENABLED
+        value: "true"
+      - key: LOCAL_AUTH_ENABLED
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_ORIGIN
+        sync: false
+      - key: CANONICAL_LAB_VERSION
+        sync: false
+      - key: SESSION_TTL_SECONDS
+        value: "28800"
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_JWT_KEY
+        sync: false
+      - key: CLERK_ISSUER
+        sync: false
+      - key: CLERK_AUDIENCE
+        sync: false
+      - key: CLERK_AUTHORIZED_PARTY
+        sync: false
+      - key: CLERK_SIGN_IN_URL
+        sync: false
+      - key: CLERK_WEBHOOK_SIGNING_SECRET
+        sync: false

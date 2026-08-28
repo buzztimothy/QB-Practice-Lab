@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
+import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
 
 const enabled=Boolean(process.env.DATABASE_URL);
+if(process.env.DATABASE_URL)assertDisposableTestDatabase(process.env.DATABASE_URL,process.env.DATABASE_LIFECYCLE_MARKER);
 const prisma=new PrismaClient();
 type Fixture=Awaited<ReturnType<typeof fixture>>;
 async function balancedEntry(attemptId:string,debitAccountId:string,creditAccountId:string,value:number,sourceType:string){return prisma.$transaction(async tx=>{const entry=await tx.journalEntry.create({data:{attemptId,description:sourceType,occurredOn:new Date('2026-01-10'),sourceType,sourceId:crypto.randomUUID()}});await tx.journalLine.createMany({data:[{entryId:entry.id,attemptId,attemptAccountId:debitAccountId,debitCents:value},{entryId:entry.id,attemptId,attemptAccountId:creditAccountId,creditCents:value}]});return entry;});}

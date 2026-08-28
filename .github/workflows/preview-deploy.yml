@@ -1,0 +1,42 @@
+name: Deploy BBB Preview
+on:
+  workflow_dispatch:
+    inputs:
+      main_sha:
+        description: Reviewed main commit to deploy
+        required: true
+concurrency:
+  group: bbb-preview-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main' && inputs.main_sha == github.sha
+    runs-on: ubuntu-latest
+    environment: bbb-preview-deploy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.main_sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm rebuild
+      - run: pnpm db:generate
+      - run: pnpm test && pnpm lint && pnpm typecheck && pnpm build
+      - run: pnpm preview:deploy-database
+        env:
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          PREVIEW_DATABASE_CONFIRMATION: bbb_practice_preview
+      - name: Trigger reviewed Render deployment
+        run: curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK_URL"
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      - name: Verify readiness
+        run: curl --fail --retry 30 --retry-delay 10 --retry-all-errors "$PREVIEW_ORIGIN/health/ready"
+        env:
+          PREVIEW_ORIGIN: ${{ vars.PREVIEW_ORIGIN }}
