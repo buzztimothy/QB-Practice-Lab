@@ -7,13 +7,14 @@ import { createStudentCommandSession, executeStudentCommand, studentCommandView,
 import { followEvidenceReference, listEvidence, openEvidence, requestEvidence } from '../../packages/accounting-domain/src/suncoast-evidence.js';
 import { answerMonthEndFollowUp, applyMonthEndAssessment, beginMonthEndMeeting, monthEndStudentView, submitMonthEndExplanation, type SuncoastMonthEndMeeting } from '../../packages/accounting-domain/src/suncoast-month-end.js';
 import { generateReadinessReport, readinessReportStudentView, type ReadinessReportHistory } from '../../packages/accounting-domain/src/suncoast-readiness-report.js';
+import { InMemoryStudentAttemptRepository, type StoredAttempt, type StudentAttemptRepository } from './persistence.js';
 
 export const studentScreens = ['meet', 'dashboard', 'bank', 'sales', 'expenses', 'accounts', 'register', 'reports', 'reconcile', 'documents', 'inbox', 'coach', 'close', 'meeting', 'results', 'history'] as const;
 export type StudentScreen = typeof studentScreens[number];
 export interface StudentAuth { readonly studentId: string }
 export interface ViewRequest { readonly attemptId?: string; readonly screen?: StudentScreen; readonly focusId?: string; readonly returnTo?: string; readonly basis?: 'CASH' | 'ACCRUAL'; readonly accountId?: string }
 
-interface AttemptRecord {
+export interface AttemptRecord {
   session: StudentCommandSession;
   status: 'ACTIVE' | 'COMPLETED' | 'RESET';
   assessment?: SuncoastAssessmentAttempt;
@@ -45,18 +46,18 @@ const visibleEvidence = (record: AttemptRecord) => studentCommandView(record.ses
 const genericFailure = (error: unknown) => error instanceof InvalidStateError && /conflict/i.test(error.message) ? 'This workspace changed. Refresh the latest attempt and try again.' : 'That action is unavailable. Your books were not changed.';
 
 export class StudentApplication {
-  private readonly attempts = new Map<string, AttemptRecord>();
-  private readonly histories = new Map<string, string[]>();
+  constructor(private readonly repository:StudentAttemptRepository=new InMemoryStudentAttemptRepository()){}
+  async isReady(){return this.repository.readiness();}
 
   async start(auth: StudentAuth): Promise<ReturnType<StudentApplication['view']>> {
-    const ids = this.histories.get(auth.studentId) ?? [];
-    const active = ids.map(id => this.attempts.get(id)).find(record => record?.status === 'ACTIVE');
-    const attemptId = active?.session.attemptId ?? await this.create(auth.studentId, ids.length + 1);
+    const history=await this.repository.listForStudent(auth.studentId);
+    const active=history.find(item=>item.record.status==='ACTIVE');
+    const attemptId=active?.record.session.attemptId??await this.create(auth.studentId,history.length+1);
     return this.view(auth, { attemptId, screen: 'meet' });
   }
 
   async view(auth: StudentAuth, request: ViewRequest = {}) {
-    const record = this.resolve(auth, request.attemptId);
+    const stored=await this.resolve(auth,request.attemptId),record=stored.record;
     const screen = request.screen ?? 'dashboard';
     const state = stateOf(record);
     const safe = studentCommandView(record.session);
@@ -100,14 +101,15 @@ export class StudentApplication {
       orientation: { owner: 'Michael Carter', business: 'Residential handyman, painting, and pressure-washing services', scope: 'Review and close the June 2026 books using the records, client context, and professional judgment available in this workspace.' },
       dashboard: { checking: accounts.find(account => account.name === 'Operating Checking')?.balance, visa: accounts.find(account => account.name === 'Gulf Coast Business Visa')?.balance, receivables: money(customers.reduce((sum, customer) => sum + customer.net.cents, 0)), checkingReconciliation: reconciliations.find(item => item.account === 'Operating Checking')?.status ?? 'NOT_STARTED', visaReconciliation: reconciliations.find(item => item.account === 'Gulf Coast Business Visa')?.status ?? 'NOT_STARTED', closeStatus: close ?? 'OPEN', clientFollowUps: data.inbox.flatMap(item => item.messages).filter(item => item.sender === 'CLIENT').length },
       data,
-      history: (this.histories.get(auth.studentId) ?? []).map(id => { const item = this.attempts.get(id)!; return { attemptId: id, attemptNumber: item.session.coaching.generation, status: item.status, hasResults: !!item.report }; }),
+      history: (await this.repository.listForStudent(auth.studentId)).map(item=>({attemptId:item.record.session.attemptId,attemptNumber:item.record.session.coaching.generation,status:item.record.status,hasResults:!!item.record.report})),
     });
   }
 
   async act(auth: StudentAuth, attemptId: string, action: StudentAction) {
-    const record = this.resolve(auth, attemptId);
+    const stored=await this.resolve(auth,attemptId),record=stored.record;
     if (record.status !== 'ACTIVE' && action.type !== 'RESET_ATTEMPT') throw new InvalidStateError('Attempt is read-only');
     try {
+      let message='Saved to your attempt.';
       if (action.type === 'BOOKKEEPING') record.session = executeStudentCommand(record.session, action.command, action.context);
       else if (action.type === 'SAVE_CORRECTION') {
         const state = stateOf(record), entry = state.attempt.entries.find(item => item.id === action.entryId);
@@ -130,13 +132,15 @@ export class StudentApplication {
       else if (action.type === 'OPEN_DOCUMENT') this.replaceEvidence(record, openEvidence(record.session.coaching.interaction.evidence, action.documentId));
       else if (action.type === 'FOLLOW_DOCUMENT') this.replaceEvidence(record, followEvidenceReference(record.session.coaching.interaction.evidence, action.documentId, action.referenceId));
       else if (action.type === 'REQUEST_DOCUMENT') this.replaceEvidence(record, requestEvidence(record.session.coaching.interaction.evidence, action.subject));
-      else if (action.type === 'CLOSE_BOOKS') { const completion = await compareAccountingCompletion(p002Of(record)); const evidence = record.session.coaching.interaction.evidence; const unresolvedMaterialEvidenceRequests = evidence.audit.filter(item => item.kind === 'DOCUMENT_REQUESTED').some(item => evidence.unlockRules.some(rule => rule.requestSubject === item.referenceId && !evidence.documents.some(document => document.id === rule.documentId && document.state === 'UNLOCKED'))); record.assessment = recordCloseAttempt(deriveSuncoastAssessment(record.session.coaching), { accountingCompletion: completion, unresolvedMaterialEvidenceRequests }); const result = record.assessment.closeAttempts.at(-1)!.result; return { ok: true as const, attemptId, message: result === 'READY_FOR_FINAL_REVIEW' ? 'Ready for final review.' : result === 'BLOCKED' ? 'Close is blocked. Review your current books, evidence, and reconciliations.' : 'Not ready yet. Review your current books, evidence, and reconciliations.' }; }
+      else if (action.type === 'CLOSE_BOOKS') { const completion = await compareAccountingCompletion(p002Of(record)); const evidence = record.session.coaching.interaction.evidence; const unresolvedMaterialEvidenceRequests = evidence.audit.filter(item => item.kind === 'DOCUMENT_REQUESTED').some(item => evidence.unlockRules.some(rule => rule.requestSubject === item.referenceId && !evidence.documents.some(document => document.id === rule.documentId && document.state === 'UNLOCKED'))); record.assessment = recordCloseAttempt(deriveSuncoastAssessment(record.session.coaching), { accountingCompletion: completion, unresolvedMaterialEvidenceRequests }); const result = record.assessment.closeAttempts.at(-1)!.result; message=result === 'READY_FOR_FINAL_REVIEW' ? 'Ready for final review.' : result === 'BLOCKED' ? 'Close is blocked. Review your current books, evidence, and reconciliations.' : 'Not ready yet. Review your current books, evidence, and reconciliations.'; }
       else if (action.type === 'BEGIN_MEETING') { if (!record.assessment) throw new InvalidStateError('Final review unavailable'); record.meeting = await beginMonthEndMeeting(record.assessment, p002Of(record)); }
       else if (action.type === 'SUBMIT_EXPLANATION') { if (!record.meeting) throw new InvalidStateError('Final review unavailable'); record.meeting = submitMonthEndExplanation(record.meeting, action.explanation); }
       else if (action.type === 'ANSWER_FOLLOW_UP') { if (!record.meeting) throw new InvalidStateError('Final review unavailable'); record.meeting = answerMonthEndFollowUp(record.meeting, action.followUpId, action.response); }
       else if (action.type === 'FINALIZE_RESULTS') { if (!record.meeting || !record.assessment) throw new InvalidStateError('Report unavailable'); const completion = await compareAccountingCompletion(p002Of(record)); const result = applyMonthEndAssessment(record.assessment, record.meeting, completion); record.assessment = result.assessment; record.meeting = result.meeting; record.report = generateReadinessReport(record.report ?? null, record.assessment, record.meeting); record.status = 'COMPLETED'; }
-      else if (action.type === 'RESET_ATTEMPT') { if (record.status !== 'COMPLETED') record.status = 'RESET'; const next = await this.create(auth.studentId, record.session.coaching.generation + 1); return { ok: true as const, attemptId: next, message: 'Your prior attempt remains in history. A new attempt is ready.' }; }
-      return { ok: true as const, attemptId, message: 'Saved to your attempt.' };
+      else if (action.type === 'RESET_ATTEMPT') { if (record.status !== 'COMPLETED') record.status = 'RESET'; const nextRecord:AttemptRecord={session:await createStudentCommandSession(auth.studentId,`${auth.studentId}-suncoast-${record.session.coaching.generation+1}`,record.session.coaching.generation+1),status:'ACTIVE'};const next=await this.repository.reset(stored,nextRecord);if(!next)return{ok:false as const,attemptId,message:'This workspace changed. Refresh the latest attempt and try again.',stale:true};return { ok: true as const, attemptId:next.record.session.attemptId, message: 'Your prior attempt remains in history. A new attempt is ready.' }; }
+      const saved=await this.repository.save(stored);
+      if(!saved)return{ok:false as const,attemptId,message:'This workspace changed. Refresh the latest attempt and try again.',stale:true};
+      return { ok: true as const, attemptId, message };
     } catch (error) {
       return { ok: false as const, attemptId, message: genericFailure(error), stale: error instanceof InvalidStateError && /conflict/i.test(error.message) };
     }
@@ -145,15 +149,14 @@ export class StudentApplication {
   private async create(studentId: string, generation: number) {
     const attemptId = `${studentId}-suncoast-${generation}`;
     const record: AttemptRecord = { session: await createStudentCommandSession(studentId, attemptId, generation), status: 'ACTIVE' };
-    this.attempts.set(attemptId, record);
-    this.histories.set(studentId, [...(this.histories.get(studentId) ?? []), attemptId]);
+    await this.repository.create(record);
     return attemptId;
   }
 
-  private resolve(auth: StudentAuth, requested?: string) {
-    const id = requested ?? this.histories.get(auth.studentId)?.at(-1);
-    const record = id ? this.attempts.get(id) : undefined;
-    if (!record || record.session.studentId !== auth.studentId) throw new NotFoundError('Attempt not found');
+  private async resolve(auth: StudentAuth, requested?: string):Promise<StoredAttempt> {
+    const id=requested??(await this.repository.listForStudent(auth.studentId)).at(-1)?.record.session.attemptId;
+    const record=id?await this.repository.findOwned(id,auth.studentId):null;
+    if(!record)throw new NotFoundError('Attempt not found');
     return record;
   }
 

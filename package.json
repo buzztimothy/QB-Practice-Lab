@@ -12,6 +12,7 @@
     "test:db": "vitest run tests/database.integration.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
+    "db:bootstrap": "node dist/scripts/bootstrap-canonical.js",
     "start:api": "node dist/apps/api/server.js",
     "start:web": "node dist/apps/web/server.js"
   },

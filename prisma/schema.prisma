@@ -326,3 +326,117 @@ model AttemptAction {
   @@unique([attemptId, sequence])
   @@map("attempt_actions")
 }
+
+model RuntimeStudent {
+  id          String           @id
+  displayName String           @map("display_name")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  attempts    RuntimeAttempt[]
+  sessions    StudentSession[]
+  identities  ExternalIdentityLink[]
+
+  @@map("runtime_students")
+}
+
+model ExternalIdentityLink {
+  id         String         @id @default(uuid()) @db.Uuid
+  studentId  String         @map("student_id")
+  provider   String
+  subject    String
+  email      String?
+  active     Boolean        @default(true)
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+  student    RuntimeStudent @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, subject])
+  @@unique([provider, email])
+  @@index([studentId, active])
+  @@map("external_identity_links")
+}
+
+model RuntimeAttempt {
+  id                 String               @id
+  studentId          String               @map("student_id")
+  labVersion         String               @map("lab_version")
+  generation         Int
+  status             String
+  revision           Int                  @default(0)
+  persistenceVersion Int                  @default(0) @map("persistence_version")
+  accountingState    Json                 @map("accounting_state")
+  evidenceState      Json                 @map("evidence_state")
+  interactionState   Json                 @map("interaction_state")
+  coachingState      Json                 @map("coaching_state")
+  assessmentState    Json?                @map("assessment_state")
+  meetingState       Json?                @map("meeting_state")
+  reportState        Json?                @map("report_state")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  student            RuntimeStudent       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  idempotency        RuntimeIdempotency[]
+  snapshots          RuntimeSnapshot[]
+
+  @@unique([studentId, labVersion, generation])
+  @@index([studentId, status, generation])
+  @@map("runtime_attempts")
+}
+
+model RuntimeIdempotency {
+  id             String         @id @default(uuid()) @db.Uuid
+  attemptId      String         @map("attempt_id")
+  idempotencyKey String         @map("idempotency_key")
+  fingerprint    String
+  commandId      String         @map("command_id")
+  revision       Int
+  createdAt      DateTime       @default(now()) @map("created_at")
+  attempt        RuntimeAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, idempotencyKey])
+  @@index([attemptId, revision])
+  @@map("runtime_idempotency")
+}
+
+model RuntimeSnapshot {
+  id         String         @id @default(uuid()) @db.Uuid
+  attemptId  String         @map("attempt_id")
+  kind       String
+  sequence   Int
+  payload    Json
+  contentHash String        @map("content_hash")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  attempt    RuntimeAttempt @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, kind, sequence])
+  @@unique([attemptId, kind, contentHash])
+  @@index([attemptId, kind, sequence])
+  @@map("runtime_snapshots")
+}
+
+model StudentSession {
+  id          String         @id @default(uuid()) @db.Uuid
+  tokenHash   String         @unique @map("token_hash")
+  studentId   String         @map("student_id")
+  subject     String
+  displayName String         @map("display_name")
+  expiresAt   DateTime       @map("expires_at")
+  revokedAt   DateTime?      @map("revoked_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  student     RuntimeStudent @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@index([studentId, expiresAt])
+  @@index([expiresAt, revokedAt])
+  @@map("student_sessions")
+}
+
+model CanonicalLabBootstrap {
+  labId           String   @map("lab_id")
+  version         String
+  contentHash     String   @map("content_hash")
+  contentManifest Json     @map("content_manifest")
+  installedAt     DateTime @default(now()) @map("installed_at")
+  verifiedAt      DateTime @default(now()) @map("verified_at")
+
+  @@id([labId, version])
+  @@map("canonical_lab_bootstrap")
+}

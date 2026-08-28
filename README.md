@@ -12,3 +12,5 @@ Standalone client bookkeeping practice lab. The P-009 local student application 
 - `tests`: unit, adversarial API, and PostgreSQL integration tests
 
 Use Node 22, PostgreSQL 16+, `pnpm install --frozen-lockfile`, `pnpm db:generate`, `pnpm test`, and `pnpm build`. To run the local shell after building, explicitly set `LOCAL_AUTH_ENABLED=true`, run `pnpm start:web`, and open `http://localhost:3000`. Select the predefined fictional Student A or Student B profile; the server creates an opaque HttpOnly session. Without explicit opt-in—and always when `NODE_ENV=production`—the local selector is disabled and the application fails closed without a configured provider. This is not a production authentication provider.
+
+For the D-000 durable runtime, apply committed migrations, build, run `pnpm db:bootstrap`, and set `DURABLE_RUNTIME_ENABLED=true`. The process then uses PostgreSQL for attempts, audit-bearing aggregates, immutable snapshots, idempotency, and hashed sessions. Production refuses to start without durable mode. See `docs/architecture/D000.md`.
