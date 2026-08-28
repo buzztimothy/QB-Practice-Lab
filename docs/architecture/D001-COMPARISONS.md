@@ -14,7 +14,7 @@ Verified against official documentation on 2026-08-28. Features and prices are v
 | Coupling/migration | Moderate; isolated adapter and provider-link | Moderate; standards reduce token coupling, tenant Actions increase ops | Higher conceptual coupling to a separate Supabase project while data is on Neon |
 | Preview operations | Lowest for invite-only pilot | Highest of these choices for a polished invitation lifecycle | Moderate |
 | Current entry cost | Hobby is free within published retained-user allowance; Pro starts at a published low monthly base | Free allowance is generous; paid Essentials starts above Clerk's base and invitation work remains | Free allowance; Pro platform starts at a published monthly minimum |
-| Decision | **Selected** | Viable fallback if enterprise policy later prefers OIDC breadth | Viable fallback if BBB later consolidates on Supabase rather than Neon |
+| Decision | **Selected on Pro for Preview** | Viable fallback if enterprise policy later prefers OIDC breadth | Viable fallback if BBB later consolidates on Supabase rather than Neon |
 
 Clerk is not selected for popularity or prebuilt UI alone. Its decisive advantage is an enforceable invite-only mode plus a simple backend validation boundary that maps cleanly into BBB's existing durable session.
 
@@ -39,6 +39,9 @@ Authentication:
 - Clerk invitations: https://clerk.com/docs/guides/users/inviting
 - Clerk raw backend request validation and authorized parties: https://clerk.com/docs/reference/backend/authenticate-request
 - Clerk same-origin session request behavior: https://clerk.com/docs/guides/development/making-requests
+- Clerk email/password verification: https://clerk.com/docs/guides/development/custom-flows/authentication/email-password
+- Clerk backend user ID/status: https://clerk.com/docs/reference/backend/types/backend-user
+- Clerk webhook verification/retries: https://clerk.com/docs/guides/development/webhooks/overview
 - Clerk pricing: https://clerk.com/pricing
 - Auth0 database connections: https://auth0.com/docs/authenticate/database-connections
 - Auth0 connection/signup guidance: https://auth0.com/docs/authenticate/connection-settings-best-practices
@@ -64,6 +67,8 @@ Hosting:
 - Render health checks and traffic gating: https://render.com/docs/health-checks
 - Render deployments: https://render.com/docs/deploys
 - Render rollback: https://render.com/docs/rollbacks
+- Render free-instance sleep limitation: https://render.com/docs/free
+- Render logging and retention: https://render.com/docs/logging
 - Render pricing: https://render.com/pricing
 - Fly health checks: https://fly.io/docs/reference/health-checks/
 - Fly pricing: https://fly.io/docs/about/pricing/
