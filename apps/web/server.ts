@@ -6,8 +6,13 @@ import { InMemoryStudentSessionAuthenticator, localDevelopmentProfiles, type Loc
 import { PrismaClient } from '@prisma/client';
 import { PrismaStudentAttemptRepository } from '../student/persistence.js';
 import { PrismaStudentSessionAuthenticator } from './authentication.js';
+import { PreviewIdentityService, createClerkProductionAuthentication, type ExternalIdentityVerifier, type IdentityWebhookVerifier, type ProductionIdentityService } from './production-authentication.js';
+import { productionRuntimeConfiguration } from './runtime-configuration.js';
 
 const readBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return new URLSearchParams(Buffer.concat(chunks).toString('utf8')); };
+const readRawBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return Buffer.concat(chunks); };
+const webRequest = (request:IncomingMessage,url:URL,body?:Buffer) => { const headers=new Headers(); for(const [name,value] of Object.entries(request.headers)){if(Array.isArray(value))for(const item of value)headers.append(name,item);else if(value!==undefined)headers.set(name,value);} return new Request(url,{method:request.method,headers,body:body?.length?body.toString('utf8'):undefined}); };
+const writeHandshake = (response:ServerResponse,value:{readonly location:string;readonly headers:Headers}) => { const headers:Record<string,string|string[]>={'cache-control':'no-store',location:value.location};value.headers.forEach((item,name)=>{if(!['location','set-cookie'].includes(name.toLowerCase()))headers[name]=item;});const cookies=value.headers.getSetCookie();if(cookies.length)headers['set-cookie']=cookies;response.writeHead(307,headers);response.end(); };
 const string = (body: URLSearchParams, key: string) => body.get(key) ?? '';
 const context = (body: URLSearchParams) => ({ expectedRevision: Number(string(body,'revision')), idempotencyKey: string(body,'key'), help: 'INDEPENDENT' as const });
 
@@ -45,6 +50,7 @@ async function actionFrom(body: URLSearchParams): Promise<StudentAction> {
 const securityHeaders = {'content-security-policy':"default-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",'x-content-type-options':'nosniff'};
 const unavailable = '<main><h1>Workspace unavailable</h1><p>The requested attempt or action is unavailable.</p></main>';
 const forbidden = '<main><h1>Request unavailable</h1><p>The request could not be accepted.</p></main>';
+const exchangePage = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Continue · BBB Client Practice Lab</title></head><body><main><h1>Continue to the Practice Lab</h1><form method="post" action="/auth/exchange"><button type="submit">Continue</button></form></main></body></html>';
 const loginPage = () => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local student sign in · BBB Client Practice Lab</title></head><body><main><h1>Local development sign in</h1><p>Select a fictional student profile. This local-only page creates a trusted server-side session.</p>${localDevelopmentProfiles.map(profile=>`<form method="post" action="/auth/login"><input type="hidden" name="profile" value="${profile.key}"><button type="submit">Continue as ${profile.principal.displayName}</button></form>`).join('')}</main></body></html>`;
 
 export interface StudentWebServerOptions {
@@ -55,6 +61,12 @@ export interface StudentWebServerOptions {
   readonly productionMode?: boolean;
   readonly allowedOrigin?: string;
   readonly secureCookies?: boolean;
+  readonly productionIdentity?: {
+    readonly verifier: ExternalIdentityVerifier;
+    readonly webhookVerifier: IdentityWebhookVerifier;
+    readonly service: ProductionIdentityService;
+    readonly signInUrl: string;
+  };
 }
 
 export function createStudentWebServer(options: StudentWebServerOptions = {}) {
@@ -65,6 +77,7 @@ export function createStudentWebServer(options: StudentWebServerOptions = {}) {
   const localAuthenticationEnabled = !productionMode && (options.localAuthenticationEnabled ?? process.env.LOCAL_AUTH_ENABLED === 'true');
   const allowedOrigin = options.allowedOrigin ?? process.env.APP_ORIGIN;
   const secureCookies = options.secureCookies ?? (productionMode || allowedOrigin?.startsWith('https://') === true);
+  const productionIdentity=options.productionIdentity;
 
 function originAllowed(request: IncomingMessage, url: URL) {
   const expected = allowedOrigin ?? (productionMode ? undefined : url.origin);
@@ -78,13 +91,16 @@ async function page(request: IncomingMessage, response: ServerResponse) {
   if(!(await application.isReady())){response.writeHead(503,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}
   if(url.pathname==='/assets/student.css'){response.writeHead(200,{'content-type':'text/css; charset=utf-8','cache-control':'no-store'});response.end(studentCss+narrowLayoutCss);return;}
   if(url.pathname==='/assets/student.js'){response.writeHead(200,{'content-type':'text/javascript; charset=utf-8','cache-control':'no-store'});response.end(studentJs);return;}
-  if(url.pathname==='/login'&&request.method==='GET'&&localAuthenticationEnabled){response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(loginPage());return;}
-  const protectedPost=request.method==='POST'&&['/auth/login','/auth/logout','/action'].includes(url.pathname);
+  if(url.pathname==='/login'&&request.method==='GET'){if(productionIdentity){response.writeHead(303,{location:productionIdentity.signInUrl,'cache-control':'no-store'});response.end();return;}if(localAuthenticationEnabled){response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(loginPage());return;}}
+  if(url.pathname==='/auth/callback'&&request.method==='GET'&&productionIdentity){const verification=await productionIdentity.verifier.verify(webRequest(request,url));if(verification&&'kind'in verification){writeHandshake(response,verification);return;}if(!verification){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(exchangePage);return;}
+  const protectedPost=request.method==='POST'&&['/auth/login','/auth/logout','/auth/exchange','/action'].includes(url.pathname);
   if(protectedPost&&!originAllowed(request,url)){response.writeHead(403,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(forbidden);return;}
   if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=await localAuthenticator.replace(request,string(body,'profile'),secureCookies);if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
-  if(url.pathname==='/auth/logout'&&request.method==='POST'&&localAuthenticationEnabled){await localAuthenticator.destroy(request);response.writeHead(303,{location:'/login','set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store'});response.end();return;}
+  if(url.pathname==='/auth/exchange'&&request.method==='POST'&&productionIdentity){const verification=await productionIdentity.verifier.verify(webRequest(request,url));if(verification&&'kind'in verification){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}const session=verification?await productionIdentity.service.exchange(request,verification):null;if(!session){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
+  if(url.pathname==='/auth/webhooks/clerk'&&request.method==='POST'&&productionIdentity){const event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,await readRawBody(request)));if(event)await productionIdentity.service.processWebhook(event);response.writeHead(204,{'cache-control':'no-store'});response.end();return;}
+  if(url.pathname==='/auth/logout'&&request.method==='POST'&&(localAuthenticationEnabled||productionIdentity)){await localAuthenticator.destroy(request);let providerRevoked=true;if(productionIdentity)try{await productionIdentity.verifier.revoke(webRequest(request,url));}catch{providerRevoked=false;}response.writeHead(providerRevoked?303:503,{...(providerRevoked?{location:'/login'}:{}),'set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store',...(!providerRevoked?securityHeaders:{})});response.end(providerRevoked?'':unavailable);return;}
   const auth=await authenticator.authenticate(request);
-  if(!auth){const json=url.pathname==='/api/student';response.writeHead(401,{'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(json?JSON.stringify({error:'Authentication required'}):localAuthenticationEnabled?loginPage():unavailable);return;}
+  if(!auth){const json=url.pathname==='/api/student',redirect=!!productionIdentity&&!json;response.writeHead(json||!redirect?401:303,{'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-store',...(redirect?{location:'/login'}:{}),...securityHeaders});response.end(json?JSON.stringify({error:'Authentication required'}):localAuthenticationEnabled?loginPage():unavailable);return;}
   if(request.method==='POST'&&url.pathname==='/action'){
     const body=await readBody(request),attemptId=string(body,'attemptId'),screen=(string(body,'screen')||'dashboard') as StudentScreen;
     const action=await actionFrom(body),result=await application.act(auth,attemptId,action); const preservedReturn=string(body,'returnTo'); const focus=action.type==='OPEN_DOCUMENT'?`&focus=${encodeURIComponent(action.documentId)}${preservedReturn?`&returnTo=${encodeURIComponent(preservedReturn)}`:''}`:''; const related=action.type==='FOLLOW_DOCUMENT'&&result.ok; const recordType=string(body,'recordType'); const destination=related?(recordType==='INVOICE'||recordType==='PAYMENT'||recordType==='DEPOSIT'?'sales':recordType==='RECONCILIATION'||recordType==='STATEMENT_TRUTH'?'reconcile':'register'):(result.attemptId!==attemptId?'meet':screen); const relatedQuery=related?`&focus=${encodeURIComponent(action.referenceId)}&returnTo=${encodeURIComponent(preservedReturn||'documents')}`:focus;
@@ -101,10 +117,17 @@ async function page(request: IncomingMessage, response: ServerResponse) {
   return createServer((request,response)=>{page(request,response).catch(()=>{response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);});});
 }
 
+const productionConfig=process.env.NODE_ENV==='production'?productionRuntimeConfiguration(process.env):undefined;
 const durableRuntimeEnabled=process.env.DURABLE_RUNTIME_ENABLED==='true';
-if(process.env.NODE_ENV==='production'&&!durableRuntimeEnabled)throw new Error('Production requires durable runtime');
 const runtimePrisma=durableRuntimeEnabled?new PrismaClient():undefined;
 const runtimeApplication=runtimePrisma?new StudentApplication(new PrismaStudentAttemptRepository(runtimePrisma)):undefined;
 const runtimeAuthenticator=runtimePrisma?new PrismaStudentSessionAuthenticator(runtimePrisma):undefined;
-export const studentWebServer=createStudentWebServer({application:runtimeApplication,authenticator:runtimeAuthenticator,localAuthenticator:runtimeAuthenticator});
-if(process.env.NODE_ENV!=='test')studentWebServer.listen(Number(process.env.WEB_PORT??3000));
+const productionAuthentication=productionConfig?createClerkProductionAuthentication(productionConfig):undefined;
+const productionIdentity=productionConfig&&productionAuthentication&&runtimePrisma?{verifier:productionAuthentication.identityVerifier,webhookVerifier:productionAuthentication.webhookVerifier,service:new PreviewIdentityService(runtimePrisma,productionConfig.sessionTtlSeconds),signInUrl:productionConfig.clerk.signInUrl}:undefined;
+export const studentWebServer=createStudentWebServer({application:runtimeApplication,authenticator:runtimeAuthenticator,localAuthenticator:runtimeAuthenticator,allowedOrigin:productionConfig?.appOrigin,productionIdentity});
+if(process.env.NODE_ENV!=='test'){
+  const port=Number(process.env.PORT??process.env.WEB_PORT??3000);
+  if(!Number.isInteger(port)||port<1||port>65_535)throw new Error('PORT must be a valid TCP port');
+  studentWebServer.listen(port);
+  process.once('SIGTERM',()=>studentWebServer.close(()=>{runtimePrisma?.$disconnect().finally(()=>process.exit(0));}));
+}

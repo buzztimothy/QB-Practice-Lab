@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@prisma/client';
+import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
 const enabled = Boolean(process.env.DATABASE_URL);
+if(process.env.DATABASE_URL)assertDisposableTestDatabase(process.env.DATABASE_URL,process.env.DATABASE_LIFECYCLE_MARKER);
 const prisma = new PrismaClient();
 describe.skipIf(!enabled)('PostgreSQL enforcement', () => {
   beforeAll(async()=>{ await prisma.$connect(); });
