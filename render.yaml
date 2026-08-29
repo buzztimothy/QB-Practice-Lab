@@ -10,6 +10,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "22.18.0"
+      - key: DEPLOYMENT_TARGET
+        value: preview
       - key: DURABLE_RUNTIME_ENABLED
         value: "true"
       - key: LOCAL_AUTH_ENABLED

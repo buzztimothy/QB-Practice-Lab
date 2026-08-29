@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { createClerkClient, type ClerkClient } from '@clerk/backend';
 import { verifyWebhook } from '@clerk/backend/webhooks';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { cookieValue, hashToken, studentSessionCookie, type AuthenticatedStudentPrincipal } from './authentication.js';
 import type { ProductionRuntimeConfiguration } from './runtime-configuration.js';
 
@@ -43,6 +43,10 @@ export interface ProductionIdentityService {
 }
 
 const normalizedEmail=(value:string)=>value.trim().toLowerCase();
+const identityLockKey=(provider:string,subject:string)=>`${provider}:${subject}`;
+const lockIdentity=async(tx:Prisma.TransactionClient,provider:string,subject:string)=>{
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(hashtextextended(${identityLockKey(provider,subject)}, 0))`;
+};
 
 export class ClerkExternalIdentityVerifier implements ExternalIdentityVerifier {
   constructor(private readonly clerk:ClerkClient,private readonly config:ProductionRuntimeConfiguration['clerk']){}
@@ -86,6 +90,9 @@ export class PreviewIdentityService implements ProductionIdentityService {
     const token=randomBytes(32).toString('base64url');
     const current=cookieValue(request,studentSessionCookie);
     const principal=await this.prisma.$transaction(async tx=>{
+      await lockIdentity(tx,identity.provider,identity.subject);
+      const disabled=await tx.providerWebhookEvent.findFirst({where:{provider:identity.provider,subject:identity.subject,disabled:true},select:{id:true}});
+      if(disabled)return null;
       if(current)await tx.studentSession.updateMany({where:{tokenHash:hashToken(current),revokedAt:null},data:{revokedAt:this.now()}});
       let link=await tx.externalIdentityLink.findUnique({where:{provider_subject:{provider:identity.provider,subject:identity.subject}},include:{student:true}});
       if(!link){
@@ -109,10 +116,11 @@ export class PreviewIdentityService implements ProductionIdentityService {
 
   async processWebhook(event:VerifiedIdentityWebhook){
     await this.prisma.$transaction(async tx=>{
+      await lockIdentity(tx,'clerk',event.subject);
       const duplicate=await tx.providerWebhookEvent.findUnique({where:{provider_providerEventId:{provider:'clerk',providerEventId:event.id}}});
       if(duplicate)return;
       const link=await tx.externalIdentityLink.findUnique({where:{provider_subject:{provider:'clerk',subject:event.subject}}});
-      await tx.providerWebhookEvent.create({data:{provider:'clerk',providerEventId:event.id,eventType:event.type}});
+      await tx.providerWebhookEvent.create({data:{provider:'clerk',providerEventId:event.id,eventType:event.type,subject:event.subject,disabled:event.disabled}});
       if(!link)return;
       if(event.disabled){
         await tx.externalIdentityLink.update({where:{id:link.id},data:{active:false}});

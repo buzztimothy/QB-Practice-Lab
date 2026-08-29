@@ -441,9 +441,12 @@ model ProviderWebhookEvent {
   provider        String
   providerEventId String   @map("provider_event_id")
   eventType       String   @map("event_type")
+  subject         String
+  disabled        Boolean  @default(false)
   processedAt     DateTime @default(now()) @map("processed_at")
 
   @@unique([provider, providerEventId])
+  @@index([provider, subject, disabled])
   @@map("provider_webhook_events")
 }
 

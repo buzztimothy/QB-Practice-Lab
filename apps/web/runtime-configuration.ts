@@ -24,6 +24,8 @@ const required = (env: NodeJS.ProcessEnv, name: string) => {
   return value;
 };
 
+export const previewApplicationOrigin='https://preview.clientpracticelabs.com';
+
 export function productionRuntimeConfiguration(env:NodeJS.ProcessEnv):ProductionRuntimeConfiguration {
   if(env.NODE_ENV!=='production')throw new Error('Preview requires NODE_ENV=production');
   if(env.DURABLE_RUNTIME_ENABLED!=='true')throw new Error('Preview requires durable runtime');
@@ -31,6 +33,7 @@ export function productionRuntimeConfiguration(env:NodeJS.ProcessEnv):Production
   const appOrigin=required(env,'APP_ORIGIN');
   const origin=new URL(appOrigin);
   if(origin.protocol!=='https:'||origin.origin!==appOrigin||origin.username||origin.password||origin.pathname!=='/'||origin.search||origin.hash)throw new Error('APP_ORIGIN must be an exact HTTPS origin');
+  if(required(env,'DEPLOYMENT_TARGET')!=='preview'||appOrigin!==previewApplicationOrigin)throw new Error('Preview requires the controlled Preview origin');
   const ttl=Number(required(env,'SESSION_TTL_SECONDS'));
   if(!Number.isInteger(ttl)||ttl<300||ttl>28_800)throw new Error('SESSION_TTL_SECONDS is outside Preview policy');
   const expectedVersion=required(env,'CANONICAL_LAB_VERSION');

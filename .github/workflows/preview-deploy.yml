@@ -24,18 +24,36 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Verify immutable current main source
+        env:
+          MAIN_SHA: ${{ inputs.main_sha }}
+        run: |
+          case "$MAIN_SHA" in (*[!0-9a-f]*|'') exit 1;; esac
+          test "${#MAIN_SHA}" -eq 40
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          git fetch --no-tags origin refs/heads/main
+          test "$(git rev-parse FETCH_HEAD)" = "$MAIN_SHA"
       - run: pnpm install --frozen-lockfile
       - run: pnpm rebuild
       - run: pnpm db:generate
       - run: pnpm test && pnpm lint && pnpm typecheck && pnpm build
+      - name: Reconfirm main before persistent mutation
+        env:
+          MAIN_SHA: ${{ inputs.main_sha }}
+        run: |
+          git fetch --no-tags origin refs/heads/main
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$MAIN_SHA"
       - run: pnpm preview:deploy-database
         env:
           DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
           PREVIEW_DATABASE_CONFIRMATION: bbb_practice_preview
+          PREVIEW_DATABASE_HOST: ${{ vars.PREVIEW_DATABASE_HOST }}
       - name: Trigger reviewed Render deployment
-        run: curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK_URL"
+        run: curl --fail --silent --show-error --request POST "${RENDER_DEPLOY_HOOK_URL}&ref=${MAIN_SHA}"
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          MAIN_SHA: ${{ inputs.main_sha }}
       - name: Verify readiness
         run: curl --fail --retry 30 --retry-delay 10 --retry-all-errors "$PREVIEW_ORIGIN/health/ready"
         env:

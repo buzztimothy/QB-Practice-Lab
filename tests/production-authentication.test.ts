@@ -11,7 +11,7 @@ import { assertDisposableTestDatabase, assertPreviewDeployDatabase } from '../sc
 const servers:ReturnType<typeof createStudentWebServer>[]=[];
 afterEach(async()=>Promise.all(servers.splice(0).map(server=>new Promise<void>(resolve=>server.close(()=>resolve())))));
 
-const validEnvironment=():NodeJS.ProcessEnv=>({NODE_ENV:'production',DURABLE_RUNTIME_ENABLED:'true',LOCAL_AUTH_ENABLED:'false',DATABASE_URL:'postgresql://runtime:secret@db.example/bbb_practice_preview?sslmode=require',APP_ORIGIN:'https://preview.clientpracticelabs.com',SESSION_TTL_SECONDS:'28800',CANONICAL_LAB_VERSION:canonicalLabVersion,CLERK_SECRET_KEY:'sk_test_secret',CLERK_PUBLISHABLE_KEY:'pk_test_key',CLERK_JWT_KEY:'-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',CLERK_ISSUER:'https://clerk.example',CLERK_AUDIENCE:'bbb-preview',CLERK_AUTHORIZED_PARTY:'https://preview.clientpracticelabs.com',CLERK_SIGN_IN_URL:'https://accounts.example/sign-in',CLERK_WEBHOOK_SIGNING_SECRET:'whsec_test'});
+const validEnvironment=():NodeJS.ProcessEnv=>({NODE_ENV:'production',DEPLOYMENT_TARGET:'preview',DURABLE_RUNTIME_ENABLED:'true',LOCAL_AUTH_ENABLED:'false',DATABASE_URL:'postgresql://runtime:secret@db.example/bbb_practice_preview?sslmode=require',APP_ORIGIN:'https://preview.clientpracticelabs.com',SESSION_TTL_SECONDS:'28800',CANONICAL_LAB_VERSION:canonicalLabVersion,CLERK_SECRET_KEY:'sk_test_secret',CLERK_PUBLISHABLE_KEY:'pk_test_key',CLERK_JWT_KEY:'-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',CLERK_ISSUER:'https://clerk.example',CLERK_AUDIENCE:'bbb-preview',CLERK_AUTHORIZED_PARTY:'https://preview.clientpracticelabs.com',CLERK_SIGN_IN_URL:'https://accounts.example/sign-in',CLERK_WEBHOOK_SIGNING_SECRET:'whsec_test'});
 
 describe('D-002 production authentication boundary',()=>{
   it('fails production startup configuration closed',()=>{
@@ -21,13 +21,16 @@ describe('D-002 production authentication boundary',()=>{
     expect(()=>productionRuntimeConfiguration({...validEnvironment(),CLERK_AUTHORIZED_PARTY:'https://attacker.example'})).toThrow(/authorized party/i);
     expect(()=>productionRuntimeConfiguration({...validEnvironment(),SESSION_TTL_SECONDS:'0'})).toThrow(/TTL/i);
     expect(()=>productionRuntimeConfiguration({...validEnvironment(),DATABASE_URL:'postgresql://runtime:secret@db.example/bbb_practice_preview'})).toThrow(/TLS/i);
+    for(const origin of ['https://example.onrender.com','https://app.clientpracticelabs.com','https://clientpracticelabs.com'])expect(()=>productionRuntimeConfiguration({...validEnvironment(),APP_ORIGIN:origin,CLERK_AUTHORIZED_PARTY:origin})).toThrow(/controlled Preview origin/i);
   });
 
   it('keeps destructive test and Preview deployment database targets mutually exclusive',()=>{
     expect(()=>assertDisposableTestDatabase('postgresql://postgres:secret@localhost/qb_d002_validation','disposable-test')).not.toThrow();
     expect(()=>assertDisposableTestDatabase('postgresql://runtime:secret@db.example/bbb_practice_preview','disposable-test')).toThrow();
-    expect(()=>assertPreviewDeployDatabase('postgresql://deploy:secret@db.example/bbb_practice_preview','bbb_practice_preview')).not.toThrow();
-    expect(()=>assertPreviewDeployDatabase('postgresql://postgres:secret@localhost/qb_d002_validation','bbb_practice_preview')).toThrow();
+    expect(()=>assertPreviewDeployDatabase('postgresql://bbb_preview_deploy:secret@ep-direct.example/bbb_practice_preview?sslmode=require','bbb_practice_preview','ep-direct.example')).not.toThrow();
+    for(const value of ['postgresql://bbb_preview_deploy:secret@ep-direct.example/bbb_practice_preview_validation?sslmode=require','postgresql://bbb_preview_deploy:secret@ep-direct-pooler.example/bbb_practice_preview?sslmode=require','postgresql://other:secret@ep-direct.example/bbb_practice_preview?sslmode=require','postgresql://bbb_preview_deploy:secret@ep-other.example/bbb_practice_preview?sslmode=require',' postgresql://bbb_preview_deploy:secret@ep-direct.example/bbb_practice_preview?sslmode=require'])expect(()=>assertPreviewDeployDatabase(value,'bbb_practice_preview','ep-direct.example')).toThrow();
+    expect(()=>assertPreviewDeployDatabase('postgresql://bbb_preview_deploy:secret@ep-direct.example/bbb%5Fpractice%5Fpreview?sslmode=require','bbb_practice_preview','ep-direct.example')).not.toThrow();
+    expect(()=>assertDisposableTestDatabase('postgresql://postgres:secret@preview.example/qb_d002_validation','disposable-test')).toThrow();
   });
 
   it('accepts only an exact-origin identity-free exchange and issues the BBB cookie',async()=>{
@@ -57,18 +60,26 @@ describe('D-002 production authentication boundary',()=>{
     const verifier=new ClerkIdentityWebhookVerifier(secret);
     await expect(verifier.verify(request(body))).resolves.toMatchObject({id,subject:'user_a',email:'student@example.test',disabled:false});
     await expect(verifier.verify(request(`${body} `))).rejects.toThrow();
+    const expiredTimestamp='1',expiredSignature=createHmac('sha256',key).update(`${id}.${expiredTimestamp}.${body}`).digest('base64');
+    await expect(verifier.verify(new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',headers:{'content-type':'application/json','svix-id':id,'svix-timestamp':expiredTimestamp,'svix-signature':`v1,${expiredSignature}`},body}))).rejects.toThrow();
+    await expect(verifier.verify(new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',body:'not-json'}))).resolves.toBeNull();
   });
 
   it('requires verified provider state, exact issuer/audience, and an enabled verified-primary-email user',async()=>{
     const environment=productionRuntimeConfiguration(validEnvironment());
     const state=(issuer=environment.clerk.issuer)=>({headers:new Headers(),isAuthenticated:true,toAuth:()=>({userId:'user_a',sessionId:'sess_a',sessionClaims:{iss:issuer,aud:[environment.clerk.audience]}})});
     const user={id:'user_a',banned:false,locked:false,primaryEmailAddressId:'email_a',emailAddresses:[{id:'email_a',emailAddress:'A@Example.Test',verification:{status:'verified'}}]};
-    let current=state(),revoked='';
-    const clerk={authenticateRequest:async()=>current,users:{getUser:async()=>user},sessions:{revokeSession:async(id:string)=>{revoked=id;}}} as unknown as ClerkClient;
+    let current=state(),revoked='',options:unknown;
+    const clerk={authenticateRequest:async(_request:Request,value:unknown)=>{options=value;return current;},users:{getUser:async()=>user},sessions:{revokeSession:async(id:string)=>{revoked=id;}}} as unknown as ClerkClient;
     const verifier=new ClerkExternalIdentityVerifier(clerk,environment.clerk);
     await expect(verifier.verify(new Request(environment.appOrigin))).resolves.toEqual({provider:'clerk',subject:'user_a',email:'a@example.test'});
+    expect(options).toMatchObject({audience:environment.clerk.audience,authorizedParties:[environment.appOrigin],acceptsToken:'session_token'});
     await verifier.revoke(new Request(environment.appOrigin));expect(revoked).toBe('sess_a');
     current=state('https://wrong-issuer.example');
+    await expect(verifier.verify(new Request(environment.appOrigin))).resolves.toBeNull();
+    current={headers:new Headers(),isAuthenticated:false,toAuth:()=>({})} as typeof current;
+    await expect(verifier.verify(new Request(environment.appOrigin))).resolves.toBeNull();
+    current={headers:new Headers(),isAuthenticated:true,toAuth:()=>({userId:'user_a',sessionId:'sess_a',sessionClaims:{iss:environment.clerk.issuer,aud:['wrong-audience']}})} as typeof current;
     await expect(verifier.verify(new Request(environment.appOrigin))).resolves.toBeNull();
   });
 });

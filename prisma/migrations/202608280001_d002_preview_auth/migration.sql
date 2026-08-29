@@ -28,10 +28,13 @@ CREATE TABLE "provider_webhook_events" (
   "provider" TEXT NOT NULL,
   "provider_event_id" TEXT NOT NULL,
   "event_type" TEXT NOT NULL,
+  "subject" TEXT NOT NULL,
+  "disabled" BOOLEAN NOT NULL DEFAULT FALSE,
   "processed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "provider_webhook_events_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "provider_webhook_events_provider_provider_event_id_key" UNIQUE ("provider", "provider_event_id")
 );
+CREATE INDEX "provider_webhook_events_provider_subject_disabled_idx" ON "provider_webhook_events"("provider", "subject", "disabled");
 
 CREATE OR REPLACE FUNCTION prevent_external_identity_reassignment() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
