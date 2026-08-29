@@ -11,11 +11,11 @@ import { assertDisposableTestDatabase, assertPreviewDeployDatabase } from '../sc
 const servers:ReturnType<typeof createStudentWebServer>[]=[];
 afterEach(async()=>Promise.all(servers.splice(0).map(server=>new Promise<void>(resolve=>server.close(()=>resolve())))));
 
-const validEnvironment=():NodeJS.ProcessEnv=>({NODE_ENV:'production',DURABLE_RUNTIME_ENABLED:'true',LOCAL_AUTH_ENABLED:'false',DATABASE_URL:'postgresql://runtime:secret@db.example/bbb_practice_preview?sslmode=require',APP_ORIGIN:'https://bbb-practice-lab-preview.onrender.com',SESSION_TTL_SECONDS:'28800',CANONICAL_LAB_VERSION:canonicalLabVersion,CLERK_SECRET_KEY:'sk_test_secret',CLERK_PUBLISHABLE_KEY:'pk_test_key',CLERK_JWT_KEY:'-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',CLERK_ISSUER:'https://clerk.example',CLERK_AUDIENCE:'bbb-preview',CLERK_AUTHORIZED_PARTY:'https://bbb-practice-lab-preview.onrender.com',CLERK_SIGN_IN_URL:'https://accounts.example/sign-in',CLERK_WEBHOOK_SIGNING_SECRET:'whsec_test'});
+const validEnvironment=():NodeJS.ProcessEnv=>({NODE_ENV:'production',DURABLE_RUNTIME_ENABLED:'true',LOCAL_AUTH_ENABLED:'false',DATABASE_URL:'postgresql://runtime:secret@db.example/bbb_practice_preview?sslmode=require',APP_ORIGIN:'https://preview.clientpracticelabs.com',SESSION_TTL_SECONDS:'28800',CANONICAL_LAB_VERSION:canonicalLabVersion,CLERK_SECRET_KEY:'sk_test_secret',CLERK_PUBLISHABLE_KEY:'pk_test_key',CLERK_JWT_KEY:'-----BEGIN PUBLIC KEY-----\ntest\n-----END PUBLIC KEY-----',CLERK_ISSUER:'https://clerk.example',CLERK_AUDIENCE:'bbb-preview',CLERK_AUTHORIZED_PARTY:'https://preview.clientpracticelabs.com',CLERK_SIGN_IN_URL:'https://accounts.example/sign-in',CLERK_WEBHOOK_SIGNING_SECRET:'whsec_test'});
 
 describe('D-002 production authentication boundary',()=>{
   it('fails production startup configuration closed',()=>{
-    expect(productionRuntimeConfiguration(validEnvironment()).appOrigin).toBe('https://bbb-practice-lab-preview.onrender.com');
+    expect(productionRuntimeConfiguration(validEnvironment()).appOrigin).toBe('https://preview.clientpracticelabs.com');
     for(const key of ['DATABASE_URL','APP_ORIGIN','CLERK_SECRET_KEY','CLERK_JWT_KEY','CLERK_WEBHOOK_SIGNING_SECRET','CANONICAL_LAB_VERSION']){const env=validEnvironment();delete env[key];expect(()=>productionRuntimeConfiguration(env),key).toThrow();}
     expect(()=>productionRuntimeConfiguration({...validEnvironment(),LOCAL_AUTH_ENABLED:'1'})).toThrow(/local authentication/i);
     expect(()=>productionRuntimeConfiguration({...validEnvironment(),CLERK_AUTHORIZED_PARTY:'https://attacker.example'})).toThrow(/authorized party/i);
