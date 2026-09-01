@@ -10,15 +10,15 @@ const mutableTables=[
 
 export const previewRuntimeGrantStatements=Object.freeze([
   'REVOKE CREATE ON SCHEMA public FROM PUBLIC',
-  'REVOKE CREATE ON SCHEMA public FROM bbb_preview_runtime',
-  'GRANT USAGE ON SCHEMA public TO bbb_preview_runtime',
-  'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM bbb_preview_runtime',
-  'GRANT SELECT ON ALL TABLES IN SCHEMA public TO bbb_preview_runtime',
-  `GRANT INSERT, UPDATE, DELETE ON TABLE ${mutableTables} TO bbb_preview_runtime`,
-  'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM bbb_preview_runtime',
-  'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bbb_preview_runtime',
-  'ALTER DEFAULT PRIVILEGES FOR ROLE bbb_preview_deploy IN SCHEMA public GRANT SELECT ON TABLES TO bbb_preview_runtime',
-  'ALTER DEFAULT PRIVILEGES FOR ROLE bbb_preview_deploy IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO bbb_preview_runtime',
+  'REVOKE CREATE ON SCHEMA public FROM bbb_preview_runtime_lp',
+  'GRANT USAGE ON SCHEMA public TO bbb_preview_runtime_lp',
+  'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM bbb_preview_runtime_lp',
+  'GRANT SELECT ON ALL TABLES IN SCHEMA public TO bbb_preview_runtime_lp',
+  `GRANT INSERT, UPDATE, DELETE ON TABLE ${mutableTables} TO bbb_preview_runtime_lp`,
+  'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM bbb_preview_runtime_lp',
+  'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bbb_preview_runtime_lp',
+  'ALTER DEFAULT PRIVILEGES FOR ROLE bbb_preview_deploy_lp IN SCHEMA public GRANT SELECT ON TABLES TO bbb_preview_runtime_lp',
+  'ALTER DEFAULT PRIVILEGES FOR ROLE bbb_preview_deploy_lp IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO bbb_preview_runtime_lp',
 ]);
 
 export async function applyPreviewRuntimeGrants(prisma:Prisma.TransactionClient){
