@@ -59,6 +59,9 @@ describe('D-002 production authentication boundary',()=>{
     const request=(value:string)=>new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',headers:{'content-type':'application/json','svix-id':id,'svix-timestamp':timestamp,'svix-signature':`v1,${signature}`},body:value});
     const verifier=new ClerkIdentityWebhookVerifier(secret);
     await expect(verifier.verify(request(body))).resolves.toMatchObject({id,subject:'user_a',email:'student@example.test',disabled:false});
+    const syntheticBody=JSON.stringify({data:{id:'user_fixture',primary_email_address_id:'email_fixture',email_addresses:[{id:'email_fixture',email_address:'Fixture@Example.Test',verification:{status:'verified',strategy:'email_code'}}]},object:'event',type:'user.updated'});
+    const syntheticSignature=createHmac('sha256',key).update(`${id}.${timestamp}.${syntheticBody}`).digest('base64');
+    await expect(verifier.verify(new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',headers:{'content-type':'application/json','svix-id':id,'svix-timestamp':timestamp,'svix-signature':`v1,${syntheticSignature}`},body:syntheticBody}))).resolves.toMatchObject({id,subject:'user_fixture',email:'fixture@example.test',disabled:false});
     await expect(verifier.verify(request(`${body} `))).rejects.toThrow();
     const expiredTimestamp='1',expiredSignature=createHmac('sha256',key).update(`${id}.${expiredTimestamp}.${body}`).digest('base64');
     await expect(verifier.verify(new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',headers:{'content-type':'application/json','svix-id':id,'svix-timestamp':expiredTimestamp,'svix-signature':`v1,${expiredSignature}`},body}))).rejects.toThrow();

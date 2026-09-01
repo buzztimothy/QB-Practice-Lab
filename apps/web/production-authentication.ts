@@ -79,7 +79,7 @@ export class ClerkIdentityWebhookVerifier implements IdentityWebhookVerifier {
     if(event.type==='user.deleted')return event.data.id?Object.freeze({id:eventId,type:event.type,subject:event.data.id,disabled:true}):null;
     const primary=event.data.email_addresses.find(item=>item.id===event.data.primary_email_address_id);
     const email=primary?.verification?.status==='verified'?normalizedEmail(primary.email_address):undefined;
-    return Object.freeze({id:eventId,type:event.type,subject:event.data.id,email,disabled:event.data.banned||event.data.locked});
+    return Object.freeze({id:eventId,type:event.type,subject:event.data.id,email,disabled:Boolean(event.data.banned||event.data.locked)});
   }
 }
 
