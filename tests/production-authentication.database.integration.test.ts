@@ -1,9 +1,12 @@
 import type { IncomingMessage } from 'node:http';
+import { createHmac, randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bootstrapCanonicalLab } from '../apps/student/persistence.js';
+import { StudentApplication } from '../apps/student/application.js';
+import { bootstrapCanonicalLab, PrismaStudentAttemptRepository } from '../apps/student/persistence.js';
 import { PrismaStudentSessionAuthenticator } from '../apps/web/authentication.js';
-import { PreviewIdentityService } from '../apps/web/production-authentication.js';
+import { ClerkIdentityWebhookVerifier, PreviewIdentityService } from '../apps/web/production-authentication.js';
+import { createStudentWebServer } from '../apps/web/server.js';
 import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
 
 const url=process.env.DATABASE_URL;
@@ -56,6 +59,31 @@ describeDb('D-002 relational identity and lifecycle enforcement',()=>{
     await prisma.studentAttempt.delete({where:{id:attempt.id}});
   });
 
+  it('processes a signed synthetic lifecycle event through the complete production HTTP route',async()=>{
+    const key=randomBytes(32),secret=`whsec_${key.toString('base64')}`,eventId=`msg_route_${suffix}`,subject=`user_route_${suffix}`;
+    const body=JSON.stringify({data:{id:subject,primary_email_address_id:'email_fixture',email_addresses:[{id:'email_fixture',email_address:'Fixture@Example.Test',verification:{status:'verified',strategy:'admin'}}]},object:'event',type:'user.updated'});
+    const timestamp=Math.floor(Date.now()/1000).toString(),signature=createHmac('sha256',key).update(`${eventId}.${timestamp}.${body}`).digest('base64');
+    const service=new PreviewIdentityService(prisma,28_800),application=new StudentApplication(new PrismaStudentAttemptRepository(prisma)),authenticator=new PrismaStudentSessionAuthenticator(prisma);
+    const diagnostics:Readonly<Record<string,string>>[]=[];
+    const server=createStudentWebServer({application,authenticator,localAuthenticator:authenticator,productionMode:true,allowedOrigin:'http://127.0.0.1',webhookDiagnostic:record=>diagnostics.push(record),productionIdentity:{signInUrl:'https://accounts.example.test/sign-in',verifier:{verify:async()=>null,revoke:async()=>{}},webhookVerifier:new ClerkIdentityWebhookVerifier(secret),service}});
+    await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+    try{
+      const address=server.address();if(!address||typeof address==='string')throw new Error('Test server address unavailable');
+      const endpoint=`http://127.0.0.1:${address.port}/auth/webhooks/clerk`,headers={'content-type':'application/json','svix-id':eventId,'svix-timestamp':timestamp,'svix-signature':`v1,${signature}`};
+      expect((await fetch(endpoint,{method:'POST',headers,body})).status).toBe(204);
+      expect((await fetch(endpoint,{method:'POST',headers,body})).status).toBe(204);
+      expect(await prisma.providerWebhookEvent.count({where:{provider:'clerk',providerEventId:eventId}})).toBe(1);
+      expect((await fetch(endpoint,{method:'POST',headers,body:`${body} `})).status).toBe(404);
+      expect(await prisma.providerWebhookEvent.count({where:{provider:'clerk',providerEventId:eventId}})).toBe(1);
+      expect(diagnostics).toEqual([
+        {component:'clerk_webhook',stage:'unmapped',providerEventId:eventId,eventType:'user.updated'},
+        {component:'clerk_webhook',stage:'duplicate',providerEventId:eventId,eventType:'user.updated'},
+        expect.objectContaining({component:'clerk_webhook',stage:'signature_rejected',providerEventId:eventId,errorClass:expect.any(String)}),
+      ]);
+      expect(JSON.stringify(diagnostics)).not.toContain('Fixture@Example.Test');
+    }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+  });
+
   it('serializes initial exchange against a concurrent disabling webhook',async()=>{
     const raceSuffix=crypto.randomUUID(),raceStudent=`d002-race-${raceSuffix}`,raceEmail=`d002-race-${raceSuffix}@example.test`,subject=`user_race_${raceSuffix}`,eventId=`evt_race_${raceSuffix}`;
     await prisma.runtimeStudent.create({data:{id:raceStudent,displayName:'D-002 Race Student',email:raceEmail,status:'INVITED'}});
@@ -66,8 +94,10 @@ describeDb('D-002 relational identity and lifecycle enforcement',()=>{
         service.exchange(request(),{provider:'clerk',subject,email:raceEmail}),
         service.processWebhook({id:eventId,type:'user.deleted',subject,disabled:true}),
       ]);
-      expect((await prisma.runtimeStudent.findUniqueOrThrow({where:{id:raceStudent}})).status).toBe('DEACTIVATED');
+      const finalStatus=(await prisma.runtimeStudent.findUniqueOrThrow({where:{id:raceStudent}})).status;
+      if(exchange)expect(finalStatus).toBe('DEACTIVATED');else expect(finalStatus).not.toBe('ACTIVE');
       expect(await prisma.studentSession.count({where:{studentId:raceStudent,revokedAt:null}})).toBe(0);
+      expect(await prisma.providerWebhookEvent.count({where:{provider:'clerk',providerEventId:eventId,disabled:true}})).toBe(1);
       if(exchange){const auth=new PrismaStudentSessionAuthenticator(prisma);expect(await auth.authenticate(request(exchange.cookie.split(';')[0]))).toBeNull();}
     }finally{
       await prisma.studentSession.deleteMany({where:{studentId:raceStudent}});await prisma.externalIdentityLink.deleteMany({where:{studentId:raceStudent}});await prisma.previewInvitation.deleteMany({where:{studentId:raceStudent}});await prisma.runtimeStudent.delete({where:{id:raceStudent}});await prisma.providerWebhookEvent.deleteMany({where:{providerEventId:eventId}});
