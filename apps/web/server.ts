@@ -102,14 +102,22 @@ async function page(request: IncomingMessage, response: ServerResponse) {
   if(url.pathname==='/auth/exchange'&&request.method==='POST'&&productionIdentity){const verification=await productionIdentity.verifier.verify(webRequest(request,url));if(verification&&'kind'in verification){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}const session=verification?await productionIdentity.service.exchange(request,verification):null;if(!session){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
   if(url.pathname==='/auth/webhooks/clerk'&&request.method==='POST'&&productionIdentity){
     const providerEventId=request.headers['svix-id'];
+    let event;
     try{
-      const event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,await readRawBody(request)));
-      if(!event){webhookDiagnostic({component:'clerk_webhook',stage:'ignored',providerEventId:diagnosticValue(providerEventId)});response.writeHead(204,{'cache-control':'no-store'});response.end();return;}
+      event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,await readRawBody(request)));
+    }catch(error){
+      const record:Record<string,string>={component:'clerk_webhook',stage:'signature_rejected',providerEventId:diagnosticValue(providerEventId),errorClass:diagnosticValue(error instanceof Error?error.constructor.name:'UnknownError','UnknownError')};
+      if(typeof error==='object'&&error!==null&&'code'in error)record.errorCode=diagnosticValue(error.code);
+      webhookDiagnostic(record);
+      throw error;
+    }
+    if(!event){webhookDiagnostic({component:'clerk_webhook',stage:'ignored',providerEventId:diagnosticValue(providerEventId)});response.writeHead(204,{'cache-control':'no-store'});response.end();return;}
+    try{
       const outcome=await productionIdentity.service.processWebhook(event);
       webhookDiagnostic({component:'clerk_webhook',stage:outcome??'processed',providerEventId:diagnosticValue(event.id),eventType:event.type});
       response.writeHead(204,{'cache-control':'no-store'});response.end();return;
     }catch(error){
-      const record:Record<string,string>={component:'clerk_webhook',stage:'rejected',providerEventId:diagnosticValue(providerEventId),errorClass:diagnosticValue(error instanceof Error?error.constructor.name:'UnknownError','UnknownError')};
+      const record:Record<string,string>={component:'clerk_webhook',stage:'internal_failure',providerEventId:diagnosticValue(event.id),eventType:event.type,errorClass:diagnosticValue(error instanceof Error?error.constructor.name:'UnknownError','UnknownError')};
       if(typeof error==='object'&&error!==null&&'code'in error)record.errorCode=diagnosticValue(error.code);
       webhookDiagnostic(record);
       throw error;

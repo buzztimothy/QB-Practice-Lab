@@ -68,6 +68,16 @@ describe('D-002 production authentication boundary',()=>{
     await expect(verifier.verify(new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',body:'not-json'}))).resolves.toBeNull();
   });
 
+  it('distinguishes post-verification internal failure without logging sensitive error or identity data',async()=>{
+    const diagnostics:Readonly<Record<string,string>>[]=[];
+    const server=createStudentWebServer({productionMode:true,webhookDiagnostic:record=>diagnostics.push(record),productionIdentity:{signInUrl:'https://accounts.example/sign-in',verifier:{verify:async()=>null,revoke:async()=>{}},webhookVerifier:{verify:async()=>({id:'msg_internal',type:'user.updated',subject:'clerk-secret-subject',email:'private@example.test',disabled:false})},service:{exchange:async()=>null,processWebhook:async()=>{throw new Error('database-secret-value');}}}});
+    servers.push(server);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address() as AddressInfo,origin=`http://127.0.0.1:${address.port}`;
+    const response=await fetch(`${origin}/auth/webhooks/clerk`,{method:'POST',headers:{'svix-id':'msg_internal'},body:'provider-payload'});
+    expect(response.status).toBe(404);
+    expect(diagnostics).toEqual([{component:'clerk_webhook',stage:'internal_failure',providerEventId:'msg_internal',eventType:'user.updated',errorClass:'Error'}]);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/database-secret-value|clerk-secret-subject|private@example\.test|provider-payload/);
+  });
+
   it('requires verified provider state, exact issuer/audience, and an enabled verified-primary-email user',async()=>{
     const environment=productionRuntimeConfiguration(validEnvironment());
     const state=(issuer=environment.clerk.issuer)=>({headers:new Headers(),isAuthenticated:true,toAuth:()=>({userId:'user_a',sessionId:'sess_a',sessionClaims:{iss:issuer,aud:[environment.clerk.audience]}})});

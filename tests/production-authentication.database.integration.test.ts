@@ -78,7 +78,7 @@ describeDb('D-002 relational identity and lifecycle enforcement',()=>{
       expect(diagnostics).toEqual([
         {component:'clerk_webhook',stage:'unmapped',providerEventId:eventId,eventType:'user.updated'},
         {component:'clerk_webhook',stage:'duplicate',providerEventId:eventId,eventType:'user.updated'},
-        expect.objectContaining({component:'clerk_webhook',stage:'rejected',providerEventId:eventId,errorClass:expect.any(String)}),
+        expect.objectContaining({component:'clerk_webhook',stage:'signature_rejected',providerEventId:eventId,errorClass:expect.any(String)}),
       ]);
       expect(JSON.stringify(diagnostics)).not.toContain('Fixture@Example.Test');
     }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
