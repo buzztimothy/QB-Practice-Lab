@@ -44,9 +44,9 @@ describe('D-002A deployment boundary',()=>{
     expect(script).not.toContain('pg_try_advisory_xact_lock');
     expect(script.indexOf('pg_try_advisory_lock')).toBeLessThan(script.indexOf("'prisma','migrate','deploy'"));
     expect(script.indexOf('pg_advisory_unlock')).toBeGreaterThan(script.lastIndexOf('bootstrap-canonical.js'));
-    expect(previewRuntimeGrantStatements).toContain('REVOKE CREATE ON SCHEMA public FROM bbb_preview_runtime');
+    expect(previewRuntimeGrantStatements).toContain('REVOKE CREATE ON SCHEMA public FROM bbb_preview_runtime_lp');
     expect(previewRuntimeGrantStatements.join('\n')).not.toContain('GRANT ALL');
-    expect(previewRuntimeGrantStatements.join('\n')).not.toContain('canonical_lab_bootstrap TO bbb_preview_runtime');
+    expect(previewRuntimeGrantStatements.join('\n')).not.toContain('canonical_lab_bootstrap TO bbb_preview_runtime_lp');
   });
 
   it('pins the controlled origins and defers every external action to D-002B',()=>{

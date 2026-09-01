@@ -1,5 +1,5 @@
 export const previewDatabaseName='bbb_practice_preview';
-export const previewDeployRole='bbb_preview_deploy';
+export const previewDeployRole='bbb_preview_deploy_lp';
 
 const parsed=(connection:string)=>{if(connection!==connection.trim())throw new Error('Database URL must not contain surrounding whitespace');const url=new URL(connection);if(url.protocol!=='postgresql:')throw new Error('Database URL must use PostgreSQL');return url;};
 const databaseName=(url:URL)=>decodeURIComponent(url.pathname.replace(/^\//,''));
