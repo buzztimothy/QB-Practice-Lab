@@ -39,7 +39,7 @@ export interface IdentityWebhookVerifier {
 
 export interface ProductionIdentityService {
   exchange(request:IncomingMessage,identity:VerifiedExternalIdentity):Promise<{readonly principal:AuthenticatedStudentPrincipal;readonly cookie:string}|null>;
-  processWebhook(event:VerifiedIdentityWebhook):Promise<void>;
+  processWebhook(event:VerifiedIdentityWebhook):Promise<'processed'|'duplicate'|'unmapped'|void>;
 }
 
 const normalizedEmail=(value:string)=>value.trim().toLowerCase();
@@ -115,13 +115,13 @@ export class PreviewIdentityService implements ProductionIdentityService {
   }
 
   async processWebhook(event:VerifiedIdentityWebhook){
-    await this.prisma.$transaction(async tx=>{
+    return this.prisma.$transaction(async tx=>{
       await lockIdentity(tx,'clerk',event.subject);
       const duplicate=await tx.providerWebhookEvent.findUnique({where:{provider_providerEventId:{provider:'clerk',providerEventId:event.id}}});
-      if(duplicate)return;
+      if(duplicate)return 'duplicate' as const;
       const link=await tx.externalIdentityLink.findUnique({where:{provider_subject:{provider:'clerk',subject:event.subject}}});
       await tx.providerWebhookEvent.create({data:{provider:'clerk',providerEventId:event.id,eventType:event.type,subject:event.subject,disabled:event.disabled}});
-      if(!link)return;
+      if(!link)return 'unmapped' as const;
       if(event.disabled){
         await tx.externalIdentityLink.update({where:{id:link.id},data:{active:false}});
         await tx.runtimeStudent.update({where:{id:link.studentId},data:{status:'DEACTIVATED'}});
@@ -130,6 +130,7 @@ export class PreviewIdentityService implements ProductionIdentityService {
         await tx.externalIdentityLink.update({where:{id:link.id},data:{email:event.email}});
         await tx.runtimeStudent.update({where:{id:link.studentId},data:{email:event.email}});
       }
+      return 'processed' as const;
     });
   }
 }

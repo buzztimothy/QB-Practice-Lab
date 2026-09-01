@@ -15,6 +15,7 @@ const webRequest = (request:IncomingMessage,url:URL,body?:Buffer) => { const hea
 const writeHandshake = (response:ServerResponse,value:{readonly location:string;readonly headers:Headers}) => { const headers:Record<string,string|string[]>={'cache-control':'no-store',location:value.location};value.headers.forEach((item,name)=>{if(!['location','set-cookie'].includes(name.toLowerCase()))headers[name]=item;});const cookies=value.headers.getSetCookie();if(cookies.length)headers['set-cookie']=cookies;response.writeHead(307,headers);response.end(); };
 const string = (body: URLSearchParams, key: string) => body.get(key) ?? '';
 const context = (body: URLSearchParams) => ({ expectedRevision: Number(string(body,'revision')), idempotencyKey: string(body,'key'), help: 'INDEPENDENT' as const });
+const diagnosticValue=(value:unknown,fallback='unavailable')=>typeof value==='string'&&value.length>0?/^[A-Za-z0-9_.:-]{1,128}$/.test(value)?value:'invalid':fallback;
 
 async function actionFrom(body: URLSearchParams): Promise<StudentAction> {
   const intent=string(body,'intent');
@@ -61,6 +62,7 @@ export interface StudentWebServerOptions {
   readonly productionMode?: boolean;
   readonly allowedOrigin?: string;
   readonly secureCookies?: boolean;
+  readonly webhookDiagnostic?: (record: Readonly<Record<string,string>>) => void;
   readonly productionIdentity?: {
     readonly verifier: ExternalIdentityVerifier;
     readonly webhookVerifier: IdentityWebhookVerifier;
@@ -78,6 +80,7 @@ export function createStudentWebServer(options: StudentWebServerOptions = {}) {
   const allowedOrigin = options.allowedOrigin ?? process.env.APP_ORIGIN;
   const secureCookies = options.secureCookies ?? (productionMode || allowedOrigin?.startsWith('https://') === true);
   const productionIdentity=options.productionIdentity;
+  const webhookDiagnostic=options.webhookDiagnostic??((record:Readonly<Record<string,string>>)=>console.info(JSON.stringify(record)));
 
 function originAllowed(request: IncomingMessage, url: URL) {
   const expected = allowedOrigin ?? (productionMode ? undefined : url.origin);
@@ -97,7 +100,21 @@ async function page(request: IncomingMessage, response: ServerResponse) {
   if(protectedPost&&!originAllowed(request,url)){response.writeHead(403,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(forbidden);return;}
   if(url.pathname==='/auth/login'&&request.method==='POST'&&localAuthenticationEnabled){const body=await readBody(request),session=await localAuthenticator.replace(request,string(body,'profile'),secureCookies);if(!session){response.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
   if(url.pathname==='/auth/exchange'&&request.method==='POST'&&productionIdentity){const verification=await productionIdentity.verifier.verify(webRequest(request,url));if(verification&&'kind'in verification){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}const session=verification?await productionIdentity.service.exchange(request,verification):null;if(!session){response.writeHead(401,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',...securityHeaders});response.end(unavailable);return;}response.writeHead(303,{location:'/', 'set-cookie':session.cookie,'cache-control':'no-store'});response.end();return;}
-  if(url.pathname==='/auth/webhooks/clerk'&&request.method==='POST'&&productionIdentity){const event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,await readRawBody(request)));if(event)await productionIdentity.service.processWebhook(event);response.writeHead(204,{'cache-control':'no-store'});response.end();return;}
+  if(url.pathname==='/auth/webhooks/clerk'&&request.method==='POST'&&productionIdentity){
+    const providerEventId=request.headers['svix-id'];
+    try{
+      const event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,await readRawBody(request)));
+      if(!event){webhookDiagnostic({component:'clerk_webhook',stage:'ignored',providerEventId:diagnosticValue(providerEventId)});response.writeHead(204,{'cache-control':'no-store'});response.end();return;}
+      const outcome=await productionIdentity.service.processWebhook(event);
+      webhookDiagnostic({component:'clerk_webhook',stage:outcome??'processed',providerEventId:diagnosticValue(event.id),eventType:event.type});
+      response.writeHead(204,{'cache-control':'no-store'});response.end();return;
+    }catch(error){
+      const record:Record<string,string>={component:'clerk_webhook',stage:'rejected',providerEventId:diagnosticValue(providerEventId),errorClass:diagnosticValue(error instanceof Error?error.constructor.name:'UnknownError','UnknownError')};
+      if(typeof error==='object'&&error!==null&&'code'in error)record.errorCode=diagnosticValue(error.code);
+      webhookDiagnostic(record);
+      throw error;
+    }
+  }
   if(url.pathname==='/auth/logout'&&request.method==='POST'&&(localAuthenticationEnabled||productionIdentity)){await localAuthenticator.destroy(request);let providerRevoked=true;if(productionIdentity)try{await productionIdentity.verifier.revoke(webRequest(request,url));}catch{providerRevoked=false;}response.writeHead(providerRevoked?303:503,{...(providerRevoked?{location:'/login'}:{}),'set-cookie':localAuthenticator.clearCookie(),'cache-control':'no-store',...(!providerRevoked?securityHeaders:{})});response.end(providerRevoked?'':unavailable);return;}
   const auth=await authenticator.authenticate(request);
   if(!auth){const json=url.pathname==='/api/student',redirect=!!productionIdentity&&!json;response.writeHead(json||!redirect?401:303,{'content-type':json?'application/json; charset=utf-8':'text/html; charset=utf-8','cache-control':'no-store',...(redirect?{location:'/login'}:{}),...securityHeaders});response.end(json?JSON.stringify({error:'Authentication required'}):localAuthenticationEnabled?loginPage():unavailable);return;}
