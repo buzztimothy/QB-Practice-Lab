@@ -75,12 +75,17 @@ describeDb('D-002 relational identity and lifecycle enforcement',()=>{
       expect(await prisma.providerWebhookEvent.count({where:{provider:'clerk',providerEventId:eventId}})).toBe(1);
       expect((await fetch(endpoint,{method:'POST',headers,body:`${body} `})).status).toBe(404);
       expect(await prisma.providerWebhookEvent.count({where:{provider:'clerk',providerEventId:eventId}})).toBe(1);
-      expect(diagnostics).toEqual([
+      const signatureInputs=diagnostics.filter(record=>record.stage==='signature_input');
+      expect(signatureInputs).toHaveLength(3);
+      expect(signatureInputs[0]).toMatchObject({component:'clerk_webhook',stage:'signature_input',bodyDigestsMatch:'true',svixIdOccurrences:'1',svixTimestampOccurrences:'1',svixSignatureOccurrences:'1',timestampWithinTolerance:'true',directVerification:'accepted',clerkSdkVerification:'accepted'});
+      expect(signatureInputs[1]).toMatchObject({bodyDigestsMatch:'true',directVerification:'accepted',clerkSdkVerification:'accepted'});
+      expect(signatureInputs[2]).toMatchObject({bodyDigestsMatch:'true',directVerification:'rejected',clerkSdkVerification:'rejected'});
+      expect(diagnostics.filter(record=>record.stage!=='signature_input')).toEqual([
         {component:'clerk_webhook',stage:'unmapped',providerEventId:eventId,eventType:'user.updated'},
         {component:'clerk_webhook',stage:'duplicate',providerEventId:eventId,eventType:'user.updated'},
         expect.objectContaining({component:'clerk_webhook',stage:'signature_rejected',providerEventId:eventId,errorClass:expect.any(String)}),
       ]);
-      expect(JSON.stringify(diagnostics)).not.toContain('Fixture@Example.Test');
+      expect(JSON.stringify(diagnostics)).not.toMatch(/Fixture@Example\.Test|user_route_|v1,|whsec_/);
     }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
   });
 

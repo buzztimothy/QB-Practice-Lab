@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createStudentWebServer } from '../apps/web/server.js';
@@ -58,7 +58,11 @@ describe('D-002 production authentication boundary',()=>{
     const signature=createHmac('sha256',key).update(`${id}.${timestamp}.${body}`).digest('base64');
     const request=(value:string)=>new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',headers:{'content-type':'application/json','svix-id':id,'svix-timestamp':timestamp,'svix-signature':`v1,${signature}`},body:value});
     const verifier=new ClerkIdentityWebhookVerifier(secret);
-    await expect(verifier.verify(request(body))).resolves.toMatchObject({id,subject:'user_a',email:'student@example.test',disabled:false});
+    const diagnostics:Readonly<Record<string,string>>[]=[];
+    await expect(verifier.verify(request(body),{rawBodyBytes:Buffer.byteLength(body),rawBodySha256:createHash('sha256').update(body).digest('hex'),svixIdOccurrences:1,svixTimestampOccurrences:1,svixSignatureOccurrences:1},record=>diagnostics.push(record))).resolves.toMatchObject({id,subject:'user_a',email:'student@example.test',disabled:false});
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({component:'clerk_webhook',stage:'signature_input',method:'POST',path:'/auth/webhooks/clerk',contentType:'application/json',contentEncoding:'absent',svixIdPresent:'true',svixTimestampPresent:'true',svixTimestampFormat:'unix_seconds',timestampWithinTolerance:'true',svixSignaturePresent:'true',svixSignatureCount:'1',secretFingerprint:expect.stringMatching(/^[0-9a-f]{12}$/),directVerification:'accepted',clerkSdkVerification:'accepted'});
+    expect(JSON.stringify(diagnostics)).not.toMatch(/Student@Example\.Test|user_a|v1,|whsec_/);
     const syntheticBody=JSON.stringify({data:{id:'user_fixture',primary_email_address_id:'email_fixture',email_addresses:[{id:'email_fixture',email_address:'Fixture@Example.Test',verification:{status:'verified',strategy:'email_code'}}]},object:'event',type:'user.updated'});
     const syntheticSignature=createHmac('sha256',key).update(`${id}.${timestamp}.${syntheticBody}`).digest('base64');
     await expect(verifier.verify(new Request('https://lab.example/auth/webhooks/clerk',{method:'POST',headers:{'content-type':'application/json','svix-id':id,'svix-timestamp':timestamp,'svix-signature':`v1,${syntheticSignature}`},body:syntheticBody}))).resolves.toMatchObject({id,subject:'user_fixture',email:'fixture@example.test',disabled:false});
