@@ -1,7 +1,8 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { createClerkClient, type ClerkClient } from '@clerk/backend';
 import { verifyWebhook } from '@clerk/backend/webhooks';
+import { Webhook } from 'standardwebhooks';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { cookieValue, hashToken, studentSessionCookie, type AuthenticatedStudentPrincipal } from './authentication.js';
 import type { ProductionRuntimeConfiguration } from './runtime-configuration.js';
@@ -34,8 +35,18 @@ export interface VerifiedIdentityWebhook {
 }
 
 export interface IdentityWebhookVerifier {
-  verify(request: Request): Promise<VerifiedIdentityWebhook | null>;
+  verify(request: Request,received?:ReceivedWebhookInput,diagnostic?:WebhookDiagnostic): Promise<VerifiedIdentityWebhook | null>;
 }
+
+export interface ReceivedWebhookInput {
+  readonly rawBodyBytes:number;
+  readonly rawBodySha256:string;
+  readonly svixIdOccurrences:number;
+  readonly svixTimestampOccurrences:number;
+  readonly svixSignatureOccurrences:number;
+}
+
+export type WebhookDiagnostic=(record:Readonly<Record<string,string>>)=>void;
 
 export interface ProductionIdentityService {
   exchange(request:IncomingMessage,identity:VerifiedExternalIdentity):Promise<{readonly principal:AuthenticatedStudentPrincipal;readonly cookie:string}|null>;
@@ -71,10 +82,47 @@ export class ClerkExternalIdentityVerifier implements ExternalIdentityVerifier {
 
 export class ClerkIdentityWebhookVerifier implements IdentityWebhookVerifier {
   constructor(private readonly signingSecret:string){}
-  async verify(request:Request){
+  async verify(request:Request,received?:ReceivedWebhookInput,diagnostic?:WebhookDiagnostic){
     const eventId=request.headers.get('svix-id');
     if(!eventId)return null;
-    const event=await verifyWebhook(request,{signingSecret:this.signingSecret});
+    const timestamp=request.headers.get('svix-timestamp')?.trim()??'';
+    const signature=request.headers.get('svix-signature')?.trim()??'';
+    const verificationBody=Buffer.from(await request.clone().arrayBuffer());
+    const verificationBodySha256=createHash('sha256').update(verificationBody).digest('hex');
+    const timestampSeconds=/^\d{10}$/.test(timestamp)?Number(timestamp):Number.NaN;
+    const timestampAgeSeconds=Number.isFinite(timestampSeconds)?Math.trunc(Date.now()/1000-timestampSeconds):undefined;
+    let directVerification='not_run_missing_headers';
+    if(eventId&&timestamp&&signature){
+      try{
+        new Webhook(this.signingSecret).verify(verificationBody,{'webhook-id':eventId,'webhook-timestamp':timestamp,'webhook-signature':signature});
+        directVerification='accepted';
+      }catch{directVerification='rejected';}
+    }
+    const inputRecord:Record<string,string>={
+      component:'clerk_webhook',stage:'signature_input',method:request.method,path:new URL(request.url).pathname,
+      contentType:request.headers.get('content-type')?.toLowerCase().startsWith('application/json')?'application/json':request.headers.has('content-type')?'other':'absent',
+      contentEncoding:request.headers.has('content-encoding')?'present':'absent',
+      rawBodyBytes:String(received?.rawBodyBytes??verificationBody.byteLength),verificationBodyBytes:String(verificationBody.byteLength),
+      rawBodySha256:received?.rawBodySha256??verificationBodySha256,verificationBodySha256,
+      bodyDigestsMatch:String((received?.rawBodySha256??verificationBodySha256)===verificationBodySha256),
+      svixIdPresent:'true',svixIdLength:String(eventId.length),svixIdOccurrences:String(received?.svixIdOccurrences??1),
+      svixTimestampPresent:String(timestamp.length>0),svixTimestampLength:String(timestamp.length),svixTimestampFormat:/^\d{10}$/.test(timestamp)?'unix_seconds':'other',
+      svixTimestampOccurrences:String(received?.svixTimestampOccurrences??(timestamp?1:0)),timestampAgeSeconds:timestampAgeSeconds===undefined?'unavailable':String(timestampAgeSeconds),
+      timestampWithinTolerance:String(timestampAgeSeconds!==undefined&&Math.abs(timestampAgeSeconds)<=300),
+      svixSignaturePresent:String(signature.length>0),svixSignatureLength:String(signature.length),svixSignatureCount:String(signature?signature.split(/\s+/).length:0),
+      svixSignatureOccurrences:String(received?.svixSignatureOccurrences??(signature?1:0)),secretFingerprint:createHash('sha256').update(this.signingSecret).digest('hex').slice(0,12),
+      directVerification
+    };
+    let event;
+    try{
+      event=await verifyWebhook(request,{signingSecret:this.signingSecret});
+      inputRecord.clerkSdkVerification='accepted';
+    }catch(error){
+      inputRecord.clerkSdkVerification='rejected';
+      diagnostic?.(inputRecord);
+      throw error;
+    }
+    diagnostic?.(inputRecord);
     if(event.type!=='user.updated'&&event.type!=='user.deleted')return null;
     if(event.type==='user.deleted')return event.data.id?Object.freeze({id:eventId,type:event.type,subject:event.data.id,disabled:true}):null;
     const primary=event.data.email_addresses.find(item=>item.id===event.data.primary_email_address_id);

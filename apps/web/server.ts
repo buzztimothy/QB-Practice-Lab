@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { StudentApplication, studentScreens, type StudentAction, type StudentScreen } from '../student/application.js';
 import { studentCss, studentJs, renderStudentApplication } from './student-ui.js';
@@ -6,11 +7,13 @@ import { InMemoryStudentSessionAuthenticator, localDevelopmentProfiles, type Loc
 import { PrismaClient } from '@prisma/client';
 import { PrismaStudentAttemptRepository } from '../student/persistence.js';
 import { PrismaStudentSessionAuthenticator } from './authentication.js';
-import { PreviewIdentityService, createClerkProductionAuthentication, type ExternalIdentityVerifier, type IdentityWebhookVerifier, type ProductionIdentityService } from './production-authentication.js';
+import { PreviewIdentityService, createClerkProductionAuthentication, type ExternalIdentityVerifier, type IdentityWebhookVerifier, type ProductionIdentityService, type ReceivedWebhookInput } from './production-authentication.js';
 import { productionRuntimeConfiguration } from './runtime-configuration.js';
 
 const readBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return new URLSearchParams(Buffer.concat(chunks).toString('utf8')); };
 const readRawBody = async (request: IncomingMessage) => { const chunks: Buffer[]=[]; for await(const chunk of request) chunks.push(Buffer.from(chunk)); return Buffer.concat(chunks); };
+const rawHeaderOccurrences=(request:IncomingMessage,name:string)=>request.rawHeaders.filter((value,index)=>index%2===0&&value.toLowerCase()===name).length;
+const receivedWebhookInput=(request:IncomingMessage,body:Buffer):ReceivedWebhookInput=>Object.freeze({rawBodyBytes:body.byteLength,rawBodySha256:createHash('sha256').update(body).digest('hex'),svixIdOccurrences:rawHeaderOccurrences(request,'svix-id'),svixTimestampOccurrences:rawHeaderOccurrences(request,'svix-timestamp'),svixSignatureOccurrences:rawHeaderOccurrences(request,'svix-signature')});
 const webRequest = (request:IncomingMessage,url:URL,body?:Buffer) => { const headers=new Headers(); for(const [name,value] of Object.entries(request.headers)){if(Array.isArray(value))for(const item of value)headers.append(name,item);else if(value!==undefined)headers.set(name,value);} return new Request(url,{method:request.method,headers,body:body?.length?body.toString('utf8'):undefined}); };
 const writeHandshake = (response:ServerResponse,value:{readonly location:string;readonly headers:Headers}) => { const headers:Record<string,string|string[]>={'cache-control':'no-store',location:value.location};value.headers.forEach((item,name)=>{if(!['location','set-cookie'].includes(name.toLowerCase()))headers[name]=item;});const cookies=value.headers.getSetCookie();if(cookies.length)headers['set-cookie']=cookies;response.writeHead(307,headers);response.end(); };
 const string = (body: URLSearchParams, key: string) => body.get(key) ?? '';
@@ -104,7 +107,8 @@ async function page(request: IncomingMessage, response: ServerResponse) {
     const providerEventId=request.headers['svix-id'];
     let event;
     try{
-      event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,await readRawBody(request)));
+      const rawBody=await readRawBody(request);
+      event=await productionIdentity.webhookVerifier.verify(webRequest(request,url,rawBody),receivedWebhookInput(request,rawBody),webhookDiagnostic);
     }catch(error){
       const record:Record<string,string>={component:'clerk_webhook',stage:'signature_rejected',providerEventId:diagnosticValue(providerEventId),errorClass:diagnosticValue(error instanceof Error?error.constructor.name:'UnknownError','UnknownError')};
       if(typeof error==='object'&&error!==null&&'code'in error)record.errorCode=diagnosticValue(error.code);
