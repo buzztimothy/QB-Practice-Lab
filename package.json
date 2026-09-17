@@ -15,6 +15,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:bootstrap": "node dist/scripts/bootstrap-canonical.js",
     "preview:invite": "node dist/scripts/provision-preview-student.js",
+    "preview:deactivate": "node dist/scripts/deactivate-preview-student.js",
     "preview:deploy-database": "node dist/scripts/deploy-preview-database.js",
     "start:api": "node dist/apps/api/server.js",
     "start:web": "node dist/apps/web/server.js"
