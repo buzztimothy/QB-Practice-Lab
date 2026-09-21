@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { lockInvitationStudent } from './invitation-recovery-lock.js';
 import { createClerkClient, type ClerkClient } from '@clerk/backend';
 import { verifyWebhook } from '@clerk/backend/webhooks';
 import { Webhook } from 'standardwebhooks';
@@ -141,6 +142,12 @@ export class PreviewIdentityService implements ProductionIdentityService {
       await lockIdentity(tx,identity.provider,identity.subject);
       const disabled=await tx.providerWebhookEvent.findFirst({where:{provider:identity.provider,subject:identity.subject,disabled:true},select:{id:true}});
       if(disabled)return null;
+      const targetLink=await tx.externalIdentityLink.findUnique({where:{provider_subject:{provider:identity.provider,subject:identity.subject}},select:{studentId:true}});
+      const targetInvitation=await tx.previewInvitation.findUnique({where:{provider_email:{provider:identity.provider,email:identity.email}},select:{studentId:true}});
+      const targetStudent=targetLink?.studentId??targetInvitation?.studentId;
+      if(!targetStudent)return null;
+      await lockInvitationStudent(tx,targetStudent);
+      if(await tx.invitationRecovery.count({where:{studentId:targetStudent,status:{not:'COMPLETED'}}}))return null;
       if(current)await tx.studentSession.updateMany({where:{tokenHash:hashToken(current),revokedAt:null},data:{revokedAt:this.now()}});
       let link=await tx.externalIdentityLink.findUnique({where:{provider_subject:{provider:identity.provider,subject:identity.subject}},include:{student:true}});
       if(!link){

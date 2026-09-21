@@ -387,16 +387,17 @@ model RuntimeHistoricalReconciliationLine {
 }
 
 model RuntimeStudent {
-  id          String           @id
-  displayName String           @map("display_name")
-  email       String?          @unique
-  status      RuntimeStudentStatus @default(ACTIVE)
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  attempts    RuntimeAttempt[]
-  sessions    StudentSession[]
-  identities  ExternalIdentityLink[]
-  invitations PreviewInvitation[]
+  id                   String                 @id
+  displayName          String                 @map("display_name")
+  email                String?                @unique
+  status               RuntimeStudentStatus   @default(ACTIVE)
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  attempts             RuntimeAttempt[]
+  sessions             StudentSession[]
+  identities           ExternalIdentityLink[]
+  invitations          PreviewInvitation[]
+  invitationRecoveries InvitationRecovery[]
 
   @@map("runtime_students")
 }
@@ -430,10 +431,58 @@ model PreviewInvitation {
   createdAt            DateTime                @default(now()) @map("created_at")
   updatedAt            DateTime                @updatedAt @map("updated_at")
   student              RuntimeStudent          @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  recoveries           InvitationRecovery[]
 
   @@unique([provider, email])
   @@index([studentId, status])
   @@map("preview_invitations")
+}
+
+enum InvitationRecoveryPhase {
+  CLAIMED
+  OLD_REVOCATION_PENDING
+  OLD_REVOKED
+  REPLACEMENT_CREATE_PENDING
+  REPLACEMENT_IDENTIFIED
+  LOCAL_RECONCILIATION_PENDING
+  COMPLETED
+}
+
+enum InvitationRecoveryStatus {
+  ACTIVE
+  BLOCKED
+  COMPLETED
+}
+
+enum InvitationRecoveryFailure {
+  PRECONDITION_FAILED
+  PROVIDER_UNAVAILABLE
+  PROVIDER_STATE_AMBIGUOUS
+  REVOCATION_UNCONFIRMED
+  CREATION_UNCONFIRMED
+  LOCAL_PERSISTENCE_FAILED
+}
+
+model InvitationRecovery {
+  id                              String                     @id @default(uuid()) @db.Uuid
+  studentId                       String                     @map("student_id")
+  email                           String
+  provider                        String
+  invitationId                    String                     @map("invitation_id") @db.Uuid
+  oldProviderInvitationId         String                     @map("old_provider_invitation_id")
+  replacementProviderInvitationId String?                    @unique @map("replacement_provider_invitation_id")
+  phase                           InvitationRecoveryPhase    @default(CLAIMED)
+  status                          InvitationRecoveryStatus   @default(ACTIVE)
+  failure                         InvitationRecoveryFailure?
+  createdAt                       DateTime                   @default(now()) @map("created_at")
+  updatedAt                       DateTime                   @updatedAt @map("updated_at")
+  completedAt                     DateTime?                  @map("completed_at")
+  student                         RuntimeStudent             @relation(fields: [studentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  invitation                      PreviewInvitation          @relation(fields: [invitationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([provider, oldProviderInvitationId])
+  @@index([studentId, status])
+  @@map("invitation_recoveries")
 }
 
 model ProviderWebhookEvent {
