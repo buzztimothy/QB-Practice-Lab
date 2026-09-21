@@ -4,7 +4,7 @@ import type { PrismaClient } from '@prisma/client';
 const email=(value:string)=>value.trim().toLowerCase();
 
 export class PreviewProvisioningService {
-  constructor(private readonly prisma:PrismaClient,private readonly clerk:Pick<ClerkClient,'invitations'>,private readonly callbackUrl:string){}
+  constructor(private readonly prisma:PrismaClient,private readonly clerk:Pick<ClerkClient,'invitations'>,private readonly invitationRedirectUrl:string){}
 
   async invite(input:{readonly studentId:string;readonly displayName:string;readonly email:string}){
     const expected=email(input.email);
@@ -16,7 +16,7 @@ export class PreviewProvisioningService {
       return existing??tx.previewInvitation.create({data:{studentId:student.id,provider:'clerk',email:expected,status:'PENDING'}});
     });
     if(invitation.status==='SENT'||invitation.status==='CONSUMED')return invitation;
-    const provider=await this.clerk.invitations.createInvitation({emailAddress:expected,notify:true,ignoreExisting:false,redirectUrl:this.callbackUrl});
+    const provider=await this.clerk.invitations.createInvitation({emailAddress:expected,notify:true,ignoreExisting:false,redirectUrl:this.invitationRedirectUrl});
     return this.prisma.previewInvitation.update({where:{id:invitation.id},data:{providerInvitationId:provider.id,status:'SENT'}});
   }
 
