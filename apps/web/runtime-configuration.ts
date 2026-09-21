@@ -1,4 +1,6 @@
 import { canonicalLabVersion } from '../student/persistence.js';
+import { clerkAccountPortalUrl, previewApplicationOrigin } from './clerk-account-portal.js';
+export { previewApplicationOrigin } from './clerk-account-portal.js';
 
 export interface ProductionRuntimeConfiguration {
   readonly production: true;
@@ -24,8 +26,6 @@ const required = (env: NodeJS.ProcessEnv, name: string) => {
   return value;
 };
 
-export const previewApplicationOrigin='https://preview.clientpracticelabs.com';
-
 export function productionRuntimeConfiguration(env:NodeJS.ProcessEnv):ProductionRuntimeConfiguration {
   if(env.NODE_ENV!=='production')throw new Error('Preview requires NODE_ENV=production');
   if(env.DURABLE_RUNTIME_ENABLED!=='true')throw new Error('Preview requires durable runtime');
@@ -44,7 +44,6 @@ export function productionRuntimeConfiguration(env:NodeJS.ProcessEnv):Production
   if(new URL(issuer).protocol!=='https:')throw new Error('Clerk issuer must use HTTPS');
   const databaseUrl=required(env,'DATABASE_URL'),database=new URL(databaseUrl);
   if(database.protocol!=='postgresql:'||database.searchParams.get('sslmode')!=='require')throw new Error('Preview database must use PostgreSQL with required TLS');
-  const signInUrl=required(env,'CLERK_SIGN_IN_URL');
-  if(new URL(signInUrl).protocol!=='https:')throw new Error('Clerk sign-in URL must use HTTPS');
+  const signInUrl=clerkAccountPortalUrl(required(env,'CLERK_SIGN_IN_URL'),appOrigin,'sign-in');
   return Object.freeze({production:true,databaseUrl,appOrigin,clerk:Object.freeze({secretKey:required(env,'CLERK_SECRET_KEY'),publishableKey:required(env,'CLERK_PUBLISHABLE_KEY'),jwtKey:required(env,'CLERK_JWT_KEY'),issuer,audience:required(env,'CLERK_AUDIENCE'),authorizedParty,signInUrl,webhookSigningSecret:required(env,'CLERK_WEBHOOK_SIGNING_SECRET')}),sessionTtlSeconds:ttl,canonicalLabVersion:expectedVersion});
 }
