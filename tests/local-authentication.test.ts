@@ -145,6 +145,13 @@ describe('P-009A local authentication and student session foundation', () => {
     await authenticated(origin, replacementCookie);
     expect((await (await authenticated(`${origin}/api/student`, replacementCookie)).json()).shell.attemptId).toBe('student-b-suncoast-1');
     expect((await authenticated(`${origin}/?attempt=student-a-suncoast-1`, replacementCookie)).status).toBe(404);
+    const workspaceHtml = await (await authenticated(origin, replacementCookie)).text();
+    expect(workspaceHtml).toContain('<form method="post" action="/auth/logout"><button type="submit">Log out</button></form>');
+    for (const rejectedOrigin of [undefined, 'http://attacker.example']) {
+      const rejected = await fetch(origin + '/auth/logout', { method: 'POST', redirect: 'manual', headers: { cookie: replacementCookie, ...(rejectedOrigin ? { origin: rejectedOrigin } : {}) } });
+      expect(rejected.status).toBe(403);
+      expect((await authenticated(origin + '/api/student', replacementCookie)).status).toBe(200);
+    }
     const logout = await authenticated(`${origin}/auth/logout`, replacementCookie, { method: 'POST', redirect: 'manual' });
     expect(logout.status).toBe(303);
     expect(logout.headers.get('set-cookie')).toMatch(/Max-Age=0/);

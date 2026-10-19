@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createStudentWebServer } from '../apps/web/server.js';
 import type { ClerkClient } from '@clerk/backend';
 import { ClerkExternalIdentityVerifier, ClerkIdentityWebhookVerifier, type VerifiedExternalIdentity } from '../apps/web/production-authentication.js';
+import { InMemoryStudentSessionAuthenticator } from '../apps/web/authentication.js';
 import { productionRuntimeConfiguration } from '../apps/web/runtime-configuration.js';
 import { canonicalLabVersion } from '../apps/student/persistence.js';
 import { assertDisposableTestDatabase, assertPreviewDeployDatabase } from '../scripts/database-target-guard.js';
@@ -42,6 +43,23 @@ describe('D-002 production authentication boundary',()=>{
     expect((await fetch(`${origin}/auth/exchange`,{method:'POST',redirect:'manual',headers:{origin:'http://attacker.example'}})).status).toBe(403);
     const result=await fetch(`${origin}/auth/exchange?studentId=student-b`,{method:'POST',redirect:'manual',headers:{origin:'http://127.0.0.1'}});
     expect(result.status).toBe(303);expect(result.headers.get('set-cookie')).toContain('HttpOnly; Secure; SameSite=Strict');expect(exchanges).toBe(1);
+  });
+
+  it.each([false, true])('revokes BBB access on logout even when provider revocation fails: %s',async(providerFailure)=>{
+    const authenticator=new InMemoryStudentSessionAuthenticator();
+    const session=await authenticator.create('STUDENT_A');
+    let revocations=0;
+    const server=createStudentWebServer({authenticator,localAuthenticator:authenticator,productionMode:true,allowedOrigin:'https://lab.example',productionIdentity:{signInUrl:'https://accounts.example/sign-in',verifier:{verify:async()=>null,revoke:async()=>{revocations++;if(providerFailure)throw new Error('private-provider-error');}},webhookVerifier:{verify:async()=>null},service:{exchange:async()=>null,processWebhook:async()=>{}}}});
+    servers.push(server);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const origin='http://127.0.0.1:'+(server.address() as AddressInfo).port,cookie=session!.cookie.split(';')[0];
+    expect((await fetch(origin,{headers:{cookie}})).status).toBe(200);
+    expect((await fetch(origin+'/api/student',{headers:{cookie}})).status).toBe(200);
+    const result=await fetch(origin+'/auth/logout',{method:'POST',redirect:'manual',headers:{origin:'https://lab.example',cookie}});
+    expect(result.status).toBe(providerFailure?503:303);
+    expect(result.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(revocations).toBe(1);
+    expect((await fetch(origin+'/api/student',{headers:{cookie}})).status).toBe(401);
+    expect(await result.text()).not.toContain('private-provider-error');
   });
 
   it('propagates the supported Clerk handshake redirect before exposing the exchange action',async()=>{
