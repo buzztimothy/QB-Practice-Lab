@@ -18,7 +18,27 @@ describe('P-009 student application shell', () => {
     const html = renderStudentApplication(await app.view(auth, { attemptId: started.shell.attemptId, screen: 'dashboard' }));
     for (const label of ['Dashboard','Bank Transactions','Sales / Customers','Expenses','Chart of Accounts','Reconcile','Reports','Documents','Client Inbox','BBB Coach','Close Books','Final Meeting','Results']) expect(html).toContain(label);
     expect(html).not.toMatch(/scenario|errors remaining|issues found|score target|clean master|answer key/i);
+    expect(html).toContain('<form method="post" action="/auth/logout"><button type="submit">Log out</button></form>');
     await expect(app.view({ studentId: 'student-b' }, { attemptId: started.shell.attemptId })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('rejects historical reset and replay while keeping the latest attempt unchanged', async () => {
+    const app = new StudentApplication(), first = await app.start(auth);
+    const firstHistory = renderStudentApplication(await app.view(auth, { attemptId: first.shell.attemptId, screen: 'history' }));
+    expect(firstHistory).toContain('data-confirm="Preserve this attempt');
+    expect(firstHistory).toContain('Start a New Attempt');
+    const reset = await app.act(auth, first.shell.attemptId, { type: 'RESET_ATTEMPT' });
+    expect(reset.ok).toBe(true);
+    const before = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' });
+    for (let replay = 0; replay < 2; replay++) {
+      expect(await app.act(auth, first.shell.attemptId, { type: 'RESET_ATTEMPT' })).toMatchObject({ ok: false, message: expect.stringContaining('Only your latest attempt') });
+    }
+    const historical = await app.view(auth, { attemptId: first.shell.attemptId, screen: 'history' });
+    expect(historical.shell.capabilities.newAttempt).toBe(false);
+    expect(renderStudentApplication(historical)).not.toContain('name="intent" value="reset-attempt"');
+    expect(await app.view(auth, { attemptId: reset.attemptId, screen: 'history' })).toEqual(before);
+    expect((await app.start(auth)).shell.attemptId).toBe(reset.attemptId);
+    await expect(app.act({ studentId: 'foreign' }, reset.attemptId, { type: 'RESET_ATTEMPT' })).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('keeps protected evidence and instructor data out of every browser DTO', async () => {
@@ -125,6 +145,24 @@ describe('P-009 protected application reachability', () => {
     await run({ type: 'SUBMIT_EXPLANATION', explanation: "June revenue was $43,000, up from May's $38,750 and April's $33,700. June net income was $25,365.28 after $17,634.72 of expenses. Checking is $84,422, but cash is not the same as profit. Jenkins owes $1,425 and Reynolds owes $2,275, so those receivables need follow-up. The Visa balance is $4,308.15 and the vehicle loan is $27,910; the books show those balances, but they do not establish that the debt is a problem." });
     model = await app.view(auth, { attemptId, screen: 'meeting' }); for (const followUp of model.data.meeting!.followUps ?? []) await run({ type: 'ANSWER_FOLLOW_UP', followUpId: followUp.id, response: 'The books support follow-up, but they do not justify a guarantee or unsupported conclusion.' });
     await run({ type: 'FINALIZE_RESULTS' }); const results = await app.view(auth, { attemptId, screen: 'results' }); expect(results.data.results?.header.title).toBe('Are You Really Ready for Clients?'); expect(results.shell.attemptStatus).toBe('COMPLETED');
-    const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.history[0]).toMatchObject({ status: 'COMPLETED', hasResults: true }); expect(next.shell.attemptNumber).toBe(2);await prisma?.$disconnect();
+    for (let visit = 0; visit < 2; visit++) {
+      const returned = await app.start(auth);
+      expect(returned.shell).toMatchObject({ attemptId, screen: 'results', attemptStatus: 'COMPLETED' });
+      expect(returned.data).toEqual(results.data);
+      expect(returned.history).toEqual(results.history);
+    }
+    const retryOptions = renderStudentApplication(await app.view(auth, { attemptId, screen: 'history' }));
+    expect(retryOptions).toContain('Start a New Attempt');
+    expect(retryOptions).toContain('data-confirm="Preserve this attempt');
+    await expect(app.act(auth, attemptId, { type: 'CLOSE_BOOKS' })).rejects.toThrow('Attempt is read-only');
+    const reset = await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' }); expect(reset.ok).toBe(true); const next = await app.view(auth, { attemptId: reset.attemptId, screen: 'history' }); expect(next.history).toHaveLength(2); expect(next.history[0]).toMatchObject({ status: 'COMPLETED', hasResults: true }); expect(next.shell.attemptNumber).toBe(2);
+    const preserved = await app.view(auth, { attemptId, screen: 'results' });
+    expect(preserved.data).toEqual(results.data);
+    expect(preserved.shell.capabilities.newAttempt).toBe(false);
+    expect(renderStudentApplication(await app.view(auth, { attemptId, screen: 'history' }))).not.toContain('name="intent" value="reset-attempt"');
+    expect(await app.act(auth, attemptId, { type: 'RESET_ATTEMPT' })).toMatchObject({ ok: false });
+    expect((await app.start(auth)).shell.attemptId).toBe(reset.attemptId);
+    expect((await app.view(auth, { attemptId: reset.attemptId })).history).toHaveLength(2);
+    await prisma?.$disconnect();
   }, 180_000);
 });

@@ -2,8 +2,8 @@ import { PrismaClient } from '@prisma/client';
 import type { IncomingMessage } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NotFoundError } from '../packages/accounting-domain/src/errors.js';
-import { StudentApplication } from '../apps/student/application.js';
-import { bootstrapCanonicalLab, PrismaStudentAttemptRepository } from '../apps/student/persistence.js';
+import { StudentApplication, type AttemptRecord } from '../apps/student/application.js';
+import { bootstrapCanonicalLab, PrismaStudentAttemptRepository, type StoredAttempt } from '../apps/student/persistence.js';
 import { PrismaStudentSessionAuthenticator } from '../apps/web/authentication.js';
 import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
 
@@ -43,6 +43,39 @@ describeDb('D-000 durable runtime',()=>{
     const studentId=`d000-owner-${Date.now()}`,auth={studentId},app=new StudentApplication(new PrismaStudentAttemptRepository(prisma));const started=await app.start(auth);
     await expect(app.view({studentId:`${studentId}-foreign`},{attemptId:started.shell.attemptId})).rejects.toBeInstanceOf(NotFoundError);
     const reset=await app.act(auth,started.shell.attemptId,{type:'RESET_ATTEMPT'});expect(reset.ok).toBe(true);const restarted=new StudentApplication(new PrismaStudentAttemptRepository(extra()));const history=await restarted.view(auth,{attemptId:reset.attemptId,screen:'history'});expect(history.history).toHaveLength(2);expect(history.history[0].status).toBe('RESET');expect(history.shell.attemptNumber).toBe(2);
+  },30_000);
+
+  it('creates one successor under concurrent reset and preserves history across restart',async()=>{
+    let arrivals=0, release!:()=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve;});
+    class RacingRepository extends PrismaStudentAttemptRepository {
+      override async reset(previous:StoredAttempt,next:AttemptRecord){
+        arrivals++;if(arrivals===2)release();await gate;
+        return super.reset(previous,next);
+      }
+    }
+    const studentId='trackb-race-'+crypto.randomUUID(),auth={studentId};
+    const one=new StudentApplication(new RacingRepository(prisma)),two=new StudentApplication(new RacingRepository(extra()));
+    const initial=await one.start(auth),attemptId=initial.shell.attemptId;
+    const sourceBefore=await prisma.canonicalLabBootstrap.findMany();
+    const ledgerId=(await prisma.runtimeAttempt.findUniqueOrThrow({where:{id:attemptId}})).ledgerAttemptId;
+    const ledger=()=>prisma.studentAttempt.findUniqueOrThrow({where:{id:ledgerId},include:{accounts:{orderBy:{id:'asc'}},entries:{orderBy:{id:'asc'},include:{lines:{orderBy:{id:'asc'}}}},customers:{orderBy:{id:'asc'}},invoices:{orderBy:{id:'asc'}},payments:{orderBy:{id:'asc'}},applications:{orderBy:{id:'asc'}},deposits:{orderBy:{id:'asc'}},reconciliations:{orderBy:{id:'asc'}}}});
+    const ledgerBefore=await ledger();
+    const results=await Promise.all([one.act(auth,attemptId,{type:'RESET_ATTEMPT'}),two.act(auth,attemptId,{type:'RESET_ATTEMPT'})]);
+    expect(results.filter(result=>result.ok)).toHaveLength(1);
+    const successor=results.find(result=>result.ok)!.attemptId;
+    const restarted=new StudentApplication(new PrismaStudentAttemptRepository(extra()));
+    const current=await restarted.start(auth);
+    expect(current.shell).toMatchObject({attemptId:successor,attemptNumber:2,attemptStatus:'ACTIVE'});
+    expect(current.history.map(item=>item.status)).toEqual(['RESET','ACTIVE']);
+    expect((await restarted.view(auth,{attemptId})).shell.attemptStatus).toBe('RESET');
+    expect(await ledger()).toEqual(ledgerBefore);
+    const before=await restarted.view(auth,{attemptId:successor});
+    expect(await restarted.act(auth,attemptId,{type:'RESET_ATTEMPT'})).toMatchObject({ok:false,message:expect.stringContaining('Only your latest attempt')});
+    expect(await restarted.view(auth,{attemptId:successor})).toEqual(before);
+    expect(await prisma.runtimeAttempt.count({where:{studentId}})).toBe(2);
+    expect(await prisma.canonicalLabBootstrap.findMany()).toEqual(sourceBefore);
+    expect(await restarted.isReady()).toBe(true);
   },30_000);
 
   it('persists hashed sessions and makes revocation authoritative across instances',async()=>{

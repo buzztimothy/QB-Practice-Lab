@@ -51,9 +51,9 @@ export class StudentApplication {
 
   async start(auth: StudentAuth): Promise<ReturnType<StudentApplication['view']>> {
     const history=await this.repository.listForStudent(auth.studentId);
-    const active=history.find(item=>item.record.status==='ACTIVE');
-    const attemptId=active?.record.session.attemptId??await this.create(auth.studentId,history.length+1);
-    return this.view(auth, { attemptId, screen: 'meet' });
+    const latest=history.at(-1)?.record;
+    const attemptId=latest?.session.attemptId??await this.create(auth.studentId,1);
+    return this.view(auth, { attemptId, screen: latest?.status==='COMPLETED'?'results':'meet' });
   }
 
   async view(auth: StudentAuth, request: ViewRequest = {}) {
@@ -96,12 +96,14 @@ export class StudentApplication {
       meeting: record.meeting ? monthEndStudentView(record.meeting) : null,
       results: record.report ? readinessReportStudentView(record.report) : null,
     };
+    const history=await this.repository.listForStudent(auth.studentId);
+    const canStartNewAttempt=history.at(-1)?.record.session.attemptId===record.session.attemptId && record.status!=='RESET';
     return Object.freeze({
-      shell: { product: 'BBB Client Practice Lab', company: 'Suncoast Home Services LLC', period: 'June 2026', attemptId: record.session.attemptId, attemptNumber: record.session.coaching.generation, attemptStatus: record.status, revision: record.session.revision, screen, focusId: request.focusId, returnTo: request.returnTo, capabilities: { meeting: close === 'READY_FOR_FINAL_REVIEW' || !!record.meeting && closeCurrent, results: !!record.report } },
+      shell: { product: 'BBB Client Practice Lab', company: 'Suncoast Home Services LLC', period: 'June 2026', attemptId: record.session.attemptId, attemptNumber: record.session.coaching.generation, attemptStatus: record.status, revision: record.session.revision, screen, focusId: request.focusId, returnTo: request.returnTo, capabilities: { newAttempt: canStartNewAttempt, meeting: close === 'READY_FOR_FINAL_REVIEW' || !!record.meeting && closeCurrent, results: !!record.report } },
       orientation: { owner: 'Michael Carter', business: 'Residential handyman, painting, and pressure-washing services', scope: 'Review and close the June 2026 books using the records, client context, and professional judgment available in this workspace.' },
       dashboard: { checking: accounts.find(account => account.name === 'Operating Checking')?.balance, visa: accounts.find(account => account.name === 'Gulf Coast Business Visa')?.balance, receivables: money(customers.reduce((sum, customer) => sum + customer.net.cents, 0)), checkingReconciliation: reconciliations.find(item => item.account === 'Operating Checking')?.status ?? 'NOT_STARTED', visaReconciliation: reconciliations.find(item => item.account === 'Gulf Coast Business Visa')?.status ?? 'NOT_STARTED', closeStatus: close ?? 'OPEN', clientFollowUps: data.inbox.flatMap(item => item.messages).filter(item => item.sender === 'CLIENT').length },
       data,
-      history: (await this.repository.listForStudent(auth.studentId)).map(item=>({attemptId:item.record.session.attemptId,attemptNumber:item.record.session.coaching.generation,status:item.record.status,hasResults:!!item.record.report})),
+      history: history.map(item=>({attemptId:item.record.session.attemptId,attemptNumber:item.record.session.coaching.generation,status:item.record.status,hasResults:!!item.record.report})),
     });
   }
 
@@ -137,7 +139,16 @@ export class StudentApplication {
       else if (action.type === 'SUBMIT_EXPLANATION') { if (!record.meeting) throw new InvalidStateError('Final review unavailable'); record.meeting = submitMonthEndExplanation(record.meeting, action.explanation); }
       else if (action.type === 'ANSWER_FOLLOW_UP') { if (!record.meeting) throw new InvalidStateError('Final review unavailable'); record.meeting = answerMonthEndFollowUp(record.meeting, action.followUpId, action.response); }
       else if (action.type === 'FINALIZE_RESULTS') { if (!record.meeting || !record.assessment) throw new InvalidStateError('Report unavailable'); const completion = await compareAccountingCompletion(p002Of(record)); const result = applyMonthEndAssessment(record.assessment, record.meeting, completion); record.assessment = result.assessment; record.meeting = result.meeting; record.report = generateReadinessReport(record.report ?? null, record.assessment, record.meeting); record.status = 'COMPLETED'; }
-      else if (action.type === 'RESET_ATTEMPT') { if (record.status !== 'COMPLETED') record.status = 'RESET'; const nextRecord:AttemptRecord={session:await createStudentCommandSession(auth.studentId,`${auth.studentId}-suncoast-${record.session.coaching.generation+1}`,record.session.coaching.generation+1),status:'ACTIVE'};const next=await this.repository.reset(stored,nextRecord);if(!next)return{ok:false as const,attemptId,message:'This workspace changed. Refresh the latest attempt and try again.',stale:true};return { ok: true as const, attemptId:next.record.session.attemptId, message: 'Your prior attempt remains in history. A new attempt is ready.' }; }
+      else if (action.type === 'RESET_ATTEMPT') {
+        const latest=(await this.repository.listForStudent(auth.studentId)).at(-1)?.record;
+        if (latest?.session.attemptId!==attemptId || record.status==='RESET') return { ok: false as const, attemptId, message: 'Only your latest attempt can start a new attempt. Open Attempt History to continue.' };
+        if (record.status !== 'COMPLETED') record.status = 'RESET';
+        const generation=record.session.coaching.generation+1;
+        const nextRecord:AttemptRecord={session:await createStudentCommandSession(auth.studentId,`${auth.studentId}-suncoast-${generation}`,generation),status:'ACTIVE'};
+        const next=await this.repository.reset(stored,nextRecord);
+        if(!next)return{ok:false as const,attemptId,message:'This workspace changed. Refresh the latest attempt and try again.',stale:true};
+        return { ok: true as const, attemptId:next.record.session.attemptId, message: 'Your prior attempt remains in history. A new attempt is ready.' };
+      }
       const saved=await this.repository.save(stored);
       if(!saved)return{ok:false as const,attemptId,message:'This workspace changed. Refresh the latest attempt and try again.',stale:true};
       return { ok: true as const, attemptId, message };
