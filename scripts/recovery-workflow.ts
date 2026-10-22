@@ -22,10 +22,30 @@ export function workflowMode(env: NodeJS.ProcessEnv) {
   requireGate(env.RECOVERY_MODE === 'preflight' || env.RECOVERY_CONFIRM === recoveryScope.studentId);
   return env.RECOVERY_MODE;
 }
-export function validatePriorRun(run: {id:number;run_attempt:number;event:string;head_sha:string;head_branch:string;path:string;display_title:string;status:string;conclusion:string}, sha:string, currentRun:string) {
-  requireGate(String(run.id) !== currentRun && run.run_attempt === 1 && run.event === 'workflow_dispatch');
+export interface PriorRun {
+  id:number; workflow_id:number; run_attempt:number; event:string; head_sha:string; head_branch:string;
+  path:string; status:string; conclusion:string; repository:{full_name:string}; head_repository:{full_name:string};
+}
+export interface PriorJobs {
+  total_count:number;
+  jobs: {run_id:number;run_attempt:number;head_sha:string;name:string;status:string;conclusion:string;steps:{name:string;status:string;conclusion:string}[]}[];
+}
+export function validatePriorRun(run:PriorRun, workflow:{id:number;path:string;state:string}, jobs:PriorJobs, sha:string, currentRun:string, requestedRun:string) {
+  requireGate(String(run.id) === requestedRun && String(run.id) !== currentRun && run.run_attempt === 1 && run.event === 'workflow_dispatch');
+  requireGate(run.repository.full_name === 'buzztimothy/QB-Practice-Lab' && run.head_repository.full_name === run.repository.full_name);
+  requireGate(workflow.state === 'active' && workflow.path === '.github/workflows/preview-recovery.yml' && run.workflow_id === workflow.id);
   requireGate(run.head_sha === sha && run.head_branch === 'main' && run.path === '.github/workflows/preview-recovery.yml');
-  requireGate(run.display_title === `Preview recovery preflight ${sha}` && run.status === 'completed' && run.conclusion === 'success');
+  requireGate(run.status === 'completed' && run.conclusion === 'success');
+  // Job/step metadata is produced by the reviewed workflow at the pinned SHA.
+  // A renamed display title cannot turn an execute or skipped job into preflight.
+  requireGate(jobs.total_count === 1 && jobs.jobs.length === 1);
+  const job = jobs.jobs[0];
+  requireGate(job.run_id === run.id && job.run_attempt === 1 && job.head_sha === sha && job.name === 'recovery preflight');
+  requireGate(job.status === 'completed' && job.conclusion === 'success');
+  for (const name of ['Guarded preflight or single recovery operation','Record successful read-only preflight']) {
+    const steps = job.steps.filter(step => step.name === name);
+    requireGate(steps.length === 1 && steps[0].status === 'completed' && steps[0].conclusion === 'success');
+  }
 }
 export function validateClerkIdentity(instance: {id:string;environmentType:string}, domains: {totalCount:number;data:readonly {frontendApiUrl:string;accountsPortalUrl?:string|null}[]}, env:NodeJS.ProcessEnv) {
   requireGate(instance.id === recoveryScope.instanceId && instance.environmentType === 'production');
@@ -59,7 +79,7 @@ export function validateInventory(state:RecoveryProviderState, replacement?:{id:
 export async function integrity(prisma:PrismaClient) {
   return prisma.$transaction(async tx => {
     await tx.$executeRawUnsafe('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
-    const tables = await tx.$queryRaw<{tablename:string}[]>`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('_prisma_migrations','invitation_recoveries') ORDER BY tablename`;
+    const tables = await tx.$queryRaw<{tablename:string}[]>`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('_prisma_migrations','invitation_recoveries','preview_release_fence') ORDER BY tablename`;
     const summary:unknown[] = [];
     for (const {tablename} of tables) {
       const name = '"' + tablename.replaceAll('"','""') + '"';

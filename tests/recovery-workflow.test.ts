@@ -12,9 +12,19 @@ describe('protected recovery workflow',()=>{
     for(const change of [{GITHUB_REPOSITORY:'other/repo'},{GITHUB_REF:'refs/heads/feature'},{GITHUB_EVENT_NAME:'push'},{GITHUB_RUN_ATTEMPT:'2'},{APPROVED_SHA:'b'.repeat(40)},{RECOVERY_MODE:'anything'},{RECOVERY_MODE:'execute'},{RECOVERY_MODE:'execute',RECOVERY_CONFIRM:'all'}])expect(()=>workflowMode({...env,...change})).toThrow('RECOVERY_GATE_REJECTED');
   });
   it('accepts only a separate successful original preflight dispatch at the same SHA',()=>{
-    const run={id:1,run_attempt:1,event:'workflow_dispatch',head_sha:sha,head_branch:'main',path:'.github/workflows/preview-recovery.yml',display_title:`Preview recovery preflight ${sha}`,status:'completed',conclusion:'success'};
-    expect(()=>validatePriorRun(run,sha,'2')).not.toThrow();
-    for(const change of [{id:2},{run_attempt:2},{event:'push'},{head_sha:'b'.repeat(40)},{head_branch:'other'},{path:'.github/workflows/preview-deploy.yml'},{display_title:`Preview recovery execute ${sha}`},{status:'in_progress'},{conclusion:'failure'}])expect(()=>validatePriorRun({...run,...change},sha,'2')).toThrow();
+    const run={id:1,workflow_id:77,run_attempt:1,event:'workflow_dispatch',head_sha:sha,head_branch:'main',path:'.github/workflows/preview-recovery.yml',display_title:`Preview recovery preflight ${sha}`,status:'completed',conclusion:'success',repository:{full_name:'buzztimothy/QB-Practice-Lab'},head_repository:{full_name:'buzztimothy/QB-Practice-Lab'}};
+    const workflow={id:77,path:run.path,state:'active'};
+    const job={run_id:1,run_attempt:1,head_sha:sha,name:'recovery preflight',status:'completed',conclusion:'success',steps:['Guarded preflight or single recovery operation','Record successful read-only preflight'].map(name=>({name,status:'completed',conclusion:'success'}))};
+    const jobs={total_count:1,jobs:[job]};
+    expect(()=>validatePriorRun(run,workflow,jobs,sha,'2','1')).not.toThrow();
+    for(const change of [{id:2},{workflow_id:78},{run_attempt:2},{event:'push'},{head_sha:'b'.repeat(40)},{head_branch:'other'},{path:'.github/workflows/preview-deploy.yml'},{status:'in_progress'},{conclusion:'failure'},{repository:{full_name:'other/repo'}},{head_repository:{full_name:'other/fork'}}])expect(()=>validatePriorRun({...run,...change},workflow,jobs,sha,'2','1')).toThrow();
+    // Spoofed/renamed display_title is never evidence of successful preflight.
+    expect(()=>validatePriorRun(run,workflow,{total_count:1,jobs:[{...job,name:'recovery execute'}]},sha,'2','1')).toThrow();
+    expect(()=>validatePriorRun(run,workflow,{total_count:1,jobs:[{...job,steps:[]}]},sha,'2','1')).toThrow();
+    expect(()=>validatePriorRun(run,workflow,{total_count:1,jobs:[{...job,steps:job.steps.map(s=>({...s,conclusion:'skipped'}))}]},sha,'2','1')).toThrow();
+    expect(()=>validatePriorRun(run,workflow,{total_count:2,jobs:[job]},sha,'2','1')).toThrow();
+    expect(()=>validatePriorRun(run,workflow,jobs,sha,'2','999')).toThrow();
+    expect(()=>validatePriorRun(run,{...workflow,id:78},jobs,sha,'2','1')).toThrow();
   });
   it('pins authenticated Clerk instance, production classification, complete domain inventory and publishable key host',()=>{
     const instance={id:recoveryScope.instanceId,environmentType:'production'};

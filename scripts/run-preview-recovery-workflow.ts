@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { createClerkClient } from '@clerk/backend';
 import { ClerkInvitationRecoveryProvider } from '../apps/web/invitation-recovery-provider.js';
 import { recoveryConfiguration } from './preview-invitation-recovery.js';
+import { withPreviewReleaseLock } from './preview-release-lock.js';
 import { databaseIdentity, eligibility, integrity, recoveryScope, requireGate, runRecoveryMode, validateClerkIdentity, validateInventory, validatePriorRun, workflowMode } from './recovery-workflow.js';
 
 let prisma:PrismaClient|undefined;
@@ -19,11 +20,18 @@ try {
   if (mode === 'execute') {
     stage = 'PRIOR_PREFLIGHT';
     requireGate(/^[0-9]+$/.test(env.PREFLIGHT_RUN_ID ?? ''));
-    const response = await fetch(`https://api.github.com/repos/buzztimothy/QB-Practice-Lab/actions/runs/${env.PREFLIGHT_RUN_ID}`, {
-      headers:{Authorization:`Bearer ${env.GH_TOKEN}`,Accept:'application/vnd.github+json'},signal:AbortSignal.timeout(30_000),redirect:'error',
-    });
-    requireGate(response.ok);
-    validatePriorRun(await response.json(), env.APPROVED_SHA!, env.GITHUB_RUN_ID!);
+    const metadata = async (path:string) => {
+      const response = await fetch(`https://api.github.com/repos/buzztimothy/QB-Practice-Lab/actions/${path}`, {
+        headers:{Authorization:`Bearer ${env.GH_TOKEN}`,Accept:'application/vnd.github+json'},signal:AbortSignal.timeout(30_000),redirect:'error',
+      });
+      requireGate(response.ok);
+      return response.json();
+    };
+    const [run,workflow,jobs] = await Promise.all([
+      metadata(`runs/${env.PREFLIGHT_RUN_ID}`),metadata('workflows/preview-recovery.yml'),
+      metadata(`runs/${env.PREFLIGHT_RUN_ID}/attempts/1/jobs?per_page=100`),
+    ]);
+    validatePriorRun(run,workflow,jobs,env.APPROVED_SHA!,env.GITHUB_RUN_ID!,env.PREFLIGHT_RUN_ID!);
   }
   stage = 'CONFIGURATION';
   requireGate(env.PREVIEW_DATABASE_HOST === recoveryScope.databaseHost);
@@ -37,12 +45,8 @@ try {
   const db = prisma;
   stage = 'DATABASE_IDENTITY';
   await databaseIdentity(db);
-  // Same session lock as deployment; no deployment workflow change needed.
-  await db.$transaction(async lock => {
-    stage = 'RELEASE_LOCK';
-    const [row] = await lock.$queryRaw<{locked:boolean}[]>`SELECT pg_try_advisory_lock(6982806162030449104) AS locked`;
-    requireGate(row.locked);
-    try {
+  stage = 'RELEASE_LOCK';
+  await withPreviewReleaseLock(db,config.databaseUrl,mode === 'execute' ? 'recovery' : 'preflight',async () => {
       let before = '', invitationId = '';
       await runRecoveryMode(mode, {
         async preflight() {
@@ -66,7 +70,7 @@ try {
           await new Promise<void>((resolve,reject) => {
             const child = spawn(process.execPath,['dist/scripts/recover-preview-invitation.js','--student-id',recoveryScope.studentId,'--confirm',recoveryScope.studentId,'--old-invitation-id',recoveryScope.oldInvitationId],{env:childEnv,stdio:'ignore',timeout:120_000});
             child.once('error',()=>reject(new Error('CLI_FAILED')));
-            child.once('exit',(code)=>code === 0 ? resolve() : reject(new Error('CLI_FAILED')));
+            child.once('close',(code)=>code === 0 ? resolve() : reject(new Error('CLI_FAILED')));
           });
         },
         async postcheck() {
@@ -82,8 +86,7 @@ try {
           await databaseIdentity(db);
         },
       });
-    } finally { await lock.$queryRaw`SELECT pg_advisory_unlock(6982806162030449104)`; }
-  },{timeout:600_000});
+  });
   console.log(JSON.stringify({success:true,mode,studentId:recoveryScope.studentId,classification:mode === 'preflight' ? 'PREFLIGHT_PASSED' : 'RECOVERY_VERIFIED'}));
 } catch {
   // Never print provider errors, child stdout, connection strings or request/response objects.

@@ -589,6 +589,17 @@ model StudentSession {
   @@map("student_sessions")
 }
 
+model PreviewReleaseFence {
+  id         String    @id
+  held       Boolean   @default(false)
+  owner      String?   @db.Uuid
+  operation  String?
+  acquiredAt DateTime? @map("acquired_at") @db.Timestamptz
+  releasedAt DateTime? @map("released_at") @db.Timestamptz
+
+  @@map("preview_release_fence")
+}
+
 model CanonicalLabBootstrap {
   labId           String   @map("lab_id")
   version         String
