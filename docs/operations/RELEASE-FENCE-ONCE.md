@@ -13,6 +13,12 @@ This temporary workflow installs only `202610220001_preview_release_fence` throu
 7. Owner reviews successful bounded job output and rechecks health, deployed SHA and baseline fingerprints. Application deployment is unnecessary: this additive metadata installation leaves the running service in place. Only after verification may corrected operators be enabled, always at current approved main and with separate operation authorization.
 8. Retire this workflow and its two installer helpers/tests through a separate reviewed removal PR immediately after verified installation; retain this runbook and run URL as audit evidence. Do not remove the migration, shared coordination helper or Prisma ledger. Until removal, an already applied fence is rejected. Never rerun a failed or successful installation.
 
+## TLS preflight before installation
+
+After the TLS preflight workflow is on reviewed main and the owner separately authorizes its use, verify that `bbb-preview-deploy` requires `buzztimothy` as its sole reviewer, allows the `main` branch only, and disallows administrator bypass. GitHub enforces these settings outside the workflow YAML. The documented owner self-review setting allows the owner to both dispatch and approve.
+
+In Actions, select **Preview deployment TLS preflight**, choose `main`, and supply the full reviewed main SHA. On the pending run, confirm the branch and SHA, select **Review deployments**, and approve only `bbb-preview-deploy` for this run. Record the run URL and require `TLS_PREFLIGHT_PASS` before considering installation. Keep the freeze active on any other outcome. The preflight uses the existing direct secret in one step and only queries the TLS status of its own PostgreSQL session. Installation requires separate authorization.
+
 ## Failure and limits
 
 No automatic retry, rollback, ledger edits or fence reset exists. Preserve the operator freeze and inspect the ledger, table and process state after any failure, cancellation or timeout. A migration can have completed even if postchecks failed. Further action requires diagnosis and separate authorization.

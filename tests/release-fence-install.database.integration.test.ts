@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
@@ -23,20 +23,37 @@ suite('one-time migration on empty disposable deploy-role database',()=>{
       cpSync('prisma/schema.prisma',join(root,'schema.prisma'));
       mkdirSync(join(root,'migrations'));
       cpSync('prisma/migrations/migration_lock.toml',join(root,'migrations/migration_lock.toml'));
-      for(const f of migrationFiles().filter(f=>f.name!==fenceMigration))cpSync(`prisma/migrations/${f.name}`,join(root,'migrations',f.name),{recursive:true});
+      const reviewedRoot=join(root,'reviewed');
+      cpSync('prisma/migrations',reviewedRoot,{recursive:true});
+      for(const {name} of migrationFiles(reviewedRoot)) {
+        const path=join(reviewedRoot,name,'migration.sql');
+        writeFileSync(path,readFileSync(path,'utf8').replaceAll('\r\n','\n'));
+      }
+      const reviewed=migrationFiles(reviewedRoot);
+      for(const f of reviewed.filter(f=>f.name!==fenceMigration)) {
+        const target=join(root,'migrations',f.name);
+        mkdirSync(target);
+        const sql=readFileSync(join(reviewedRoot,f.name,'migration.sql'),'utf8');
+        writeFileSync(join(target,'migration.sql'),f.compatibleChecksum?sql.replaceAll('\n','\r\n'):sql);
+      }
       migrate(join(root,'schema.prisma'));
       await db.$transaction(tx=>applyPreviewRuntimeGrants(tx));
       await bootstrapCanonicalLab(db);
       await db.runtimeStudent.create({data:{id:'disposable-student',displayName:'Disposable fixture',status:'INVITED'}});
       await db.previewInvitation.create({data:{studentId:'disposable-student',email:'fixture@example.invalid',status:'SENT',providerInvitationId:'inv_fixture'}});
       const ledger=()=>db.$queryRaw<LedgerRow[]>`SELECT migration_name,checksum,finished_at,rolled_back_at FROM _prisma_migrations`;
-      validateLedger(await ledger(),migrationFiles());
+      const applied=await ledger();
+      expect(reviewed.filter(f=>applied.some(row=>row.migration_name===f.name && row.checksum!==f.checksum)).map(f=>f.name).sort()).toEqual([
+        '202608190001_p000a_operations','202608270001_d000_durable_runtime','202608280001_d002_preview_auth',
+      ]);
+      validateLedger(applied,reviewed);
       let called=false;
       await expect(withPreviewReleaseLock(db,url!,'deployment',async()=>{called=true;})).rejects.toThrow();
       expect(called).toBe(false);
       const before=await installIntegrity(db);
-      migrate(resolve('prisma/schema.prisma'));
-      await verifyInstalled(db);
+      cpSync(join(reviewedRoot,fenceMigration),join(root,'migrations',fenceMigration),{recursive:true});
+      migrate(join(root,'schema.prisma'));
+      await verifyInstalled(db,reviewed);
       expect(await installIntegrity(db)).toBe(before);
       expect(()=>validateLedger([],migrationFiles())).toThrow();
       const installed=await ledger();
