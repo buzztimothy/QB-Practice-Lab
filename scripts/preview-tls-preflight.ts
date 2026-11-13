@@ -34,3 +34,49 @@ export async function runPreviewTlsPreflight(env: NodeJS.ProcessEnv): Promise<bo
     await db.$disconnect();
   }
 }
+
+// Only numeric classifications cross the credentialed process boundary.
+export const tlsPreflightExit = Object.freeze({
+  pass: 0, target: 10, connection: 11, query: 12,
+  identity: 13, tlsFalse: 14, unavailable: 15, internal: 16,
+});
+
+interface DiagnosticClient {
+  $connect(): Promise<void>;
+  $disconnect(): Promise<void>;
+  $queryRaw(query: TemplateStringsArray, database: string, role: string): Promise<{
+    databaseMatches: boolean; roleMatches: boolean; ssl: boolean | null;
+  }[]>;
+}
+
+export async function diagnosePreviewTls(
+  env: NodeJS.ProcessEnv,
+  createClient: (url: string) => DiagnosticClient = url => new PrismaClient({datasources:{db:{url}}}),
+): Promise<number> {
+  const url=env.DIRECT_DATABASE_URL??'';
+  try { assertPreviewTlsTarget(url,env.PREVIEW_DATABASE_HOST); }
+  catch { return tlsPreflightExit.target; }
+  let db:DiagnosticClient;
+  try { db=createClient(url); }
+  catch { return tlsPreflightExit.internal; }
+  let result:number=tlsPreflightExit.connection;
+  try {
+    await db.$connect();
+    result=tlsPreflightExit.query;
+    const rows=await db.$queryRaw`
+      SELECT current_database() = ${previewDatabaseName} AS "databaseMatches",
+             current_user = ${previewDeployRole} AS "roleMatches",
+             (SELECT ssl FROM pg_catalog.pg_stat_ssl WHERE pid=pg_backend_pid()) AS ssl
+    `;
+    if(rows.length!==1) result=tlsPreflightExit.unavailable;
+    else if(rows[0].databaseMatches!==true || rows[0].roleMatches!==true) result=tlsPreflightExit.identity;
+    else if(rows[0].ssl===true) result=tlsPreflightExit.pass;
+    else result=rows[0].ssl===false?tlsPreflightExit.tlsFalse:tlsPreflightExit.unavailable;
+  } catch {
+    // Preserve the stage without serializing provider errors.
+  } finally {
+    try { await db.$disconnect(); }
+    catch { result=tlsPreflightExit.internal; }
+  }
+  return result;
+}
