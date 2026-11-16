@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NotFoundError } from '../packages/accounting-domain/src/errors.js';
-import { StudentApplication, type StudentAction } from '../apps/student/application.js';
+import { StudentApplication, type StudentAction, type StudentScreen } from '../apps/student/application.js';
 import { renderStudentApplication } from '../apps/web/student-ui.js';
 import { narrowLayoutCss } from '../apps/web/narrow-layout.js';
 import type { StudentBookkeepingCommand } from '../packages/accounting-domain/src/suncoast-commands.js';
@@ -20,6 +20,21 @@ describe('P-009 student application shell', () => {
     expect(html).not.toMatch(/scenario|errors remaining|issues found|score target|clean master|answer key/i);
     expect(html).toContain('<form method="post" action="/auth/logout"><button type="submit">Log out</button></form>');
     await expect(app.view({ studentId: 'student-b' }, { attemptId: started.shell.attemptId })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('offers a self-guided Demo from orientation and preserves the attempt while exploring',async()=>{
+    const app=new StudentApplication(), start=await app.start(auth);
+    const html=renderStudentApplication(start);
+    expect(html).toContain('id="demo-title"');
+    expect(html.match(/<details>/g)).toHaveLength(6);
+    for(const screen of ['documents','reports','inbox','bank','reconcile','close']) {
+      expect(html).toContain(`attempt=${start.shell.attemptId}&screen=${screen}`);
+      const page=await app.view(auth,{attemptId:start.shell.attemptId,screen:screen as StudentScreen});
+      expect(page.shell.revision).toBe(start.shell.revision);
+      expect(renderStudentApplication(page)).toContain('Self-guided Demo');
+    }
+    expect(await app.start(auth)).toEqual(start);
+    expect(html).not.toMatch(/clean master|answer key|payroll-report-june-14|abc-deposit-agreement/);
   });
 
   it('rejects historical reset and replay while keeping the latest attempt unchanged', async () => {
