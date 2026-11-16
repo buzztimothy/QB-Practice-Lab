@@ -1,92 +1,94 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
-import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
-import { assertPreviewTlsTarget, diagnosePreviewTls, verifySessionTls } from '../scripts/preview-tls-preflight.js';
+import { diagnosePreviewTls } from '../scripts/preview-tls-preflight.js';
+import { strictPreviewDatabaseUrl } from '../scripts/strict-preview-connection.js';
 import { recoveryScope } from '../scripts/recovery-workflow.js';
 
-describe('Preview TLS preflight',()=>{
-  const host=recoveryScope.databaseHost;
-  const base=`postgresql://bbb_preview_deploy_lp:fixture@${host}/bbb_practice_preview`;
-  it('requires the approved direct target and a single explicit TLS requirement',()=>{
-    expect(()=>assertPreviewTlsTarget(base+'?sslmode=require',host)).not.toThrow();
-    for(const invalid of [
-      base, base+'?sslmode=prefer', base+'?sslmode=require&sslmode=disable',
-      base+'?sslmode=require&sslmode=require', base+'?sslmode=require&sslaccept=accept_invalid_certs',
-      base+'?sslmode=require&options=ignored', base+'?sslmode=require&pgbouncer=true',
-      base+'?sslmode=require&host=%2Ftmp',
-      base+'?sslmode=require&schema=other', base.replace(host,'wrong.invalid')+'?sslmode=require',
-      base.replace('bbb_preview_deploy_lp','wrong')+'?sslmode=require',
-      base.replace('bbb_practice_preview','wrong')+'?sslmode=require',
-    ]) expect(()=>assertPreviewTlsTarget(invalid,host)).toThrow();
-    expect(()=>assertPreviewTlsTarget(base+'?sslmode=require',undefined)).toThrow();
+const host=recoveryScope.databaseHost;
+const base=`postgresql://bbb_preview_deploy_lp:fixture@${host}/bbb_practice_preview`;
+
+describe('strict Preview connection policy',()=>{
+  it('validates the original target and derives strict TLS without changing identity or the input',()=>{
+    const input=base+'?sslmode=require&schema=public&connection_limit=1&connect_timeout=10&channel_binding=require';
+    const strict=new URL(strictPreviewDatabaseUrl(input,host));
+    expect(strict.searchParams.getAll('sslmode')).toEqual(['require']);
+    expect(strict.searchParams.getAll('sslaccept')).toEqual(['strict']);
+    expect(strict.hostname).toBe(host);
+    expect(strict.pathname).toBe('/bbb_practice_preview');
+    expect(strict.username).toBe('bbb_preview_deploy_lp');
+    expect(strict.searchParams.get('connect_timeout')).toBe('10');
+    expect(input).not.toContain('sslaccept');
   });
-  it('fails closed on false, NULL, missing or ambiguous TLS status and query failure',async()=>{
-    const query=vi.fn<Parameters<typeof verifySessionTls>[0]['$queryRaw']>();
-    const verify=()=>verifySessionTls({$queryRaw:query},'test_database','test_role');
-    for(const rows of [[{ssl:false}],[{ssl:null}],[],[{ssl:true},{ssl:true}]]) {
-      query.mockResolvedValueOnce(rows);
-      await expect(verify()).resolves.toBe(false);
+  it('rejects unexpected, duplicate or weakening options before constructing a client',()=>{
+    for(const query of [
+      '', '?sslmode=prefer', '?sslmode=verify-full', '?sslmode=require&sslmode=disable',
+      '?sslmode=require&sslmode=require', '?sslmode=require&sslaccept=strict',
+      '?sslmode=require&sslaccept=accept_invalid_certs', '?sslmode=require&sslcert=untrusted.pem',
+      '?sslmode=require&sslrootcert=untrusted.pem', '?sslmode=require&sslidentity=client.p12',
+      '?sslmode=require&options=ignored', '?sslmode=require&pgbouncer=true',
+      '?sslmode=require&host=%2Ftmp', '?sslmode=require&hostaddr=127.0.0.1',
+      '?sslmode=require&schema=other', '?sslmode=require&schema=public&schema=public',
+      '?sslmode=require&connection_limit=0', '?sslmode=require&connect_timeout=-1',
+      '?sslmode=require&channel_binding=disable', '?sslmode=require&unknown=value',
+      '?sslmode=require#fragment',
+    ]) expect(()=>strictPreviewDatabaseUrl(base+query,host)).toThrow();
+    for(const target of [
+      base.replace(host,'wrong.invalid'),base.replace(host,host.replace('.','-pooler.')),
+      base.replace('bbb_preview_deploy_lp','wrong'),base.replace('bbb_practice_preview','wrong'),
+      base.replace(host,host+':5433'),' '+base,base.replace('postgresql:','postgres:'),
+    ]) expect(()=>strictPreviewDatabaseUrl(target+'?sslmode=require',host)).toThrow();
+    expect(()=>strictPreviewDatabaseUrl(base+'?sslmode=require',undefined)).toThrow();
+  });
+  it('fails closed if the generated Prisma client or engine pin changes',()=>{
+    const runtimeVersion=Prisma.prismaVersion as {client:string;engine?:string};
+    const version={...runtimeVersion};
+    try {
+      runtimeVersion.engine='unsupported';
+      expect(()=>strictPreviewDatabaseUrl(base+'?sslmode=require',host)).toThrow();
+      runtimeVersion.engine=version.engine;
+      runtimeVersion.client='unsupported';
+      expect(()=>strictPreviewDatabaseUrl(base+'?sslmode=require',host)).toThrow();
+    } finally {
+      Object.assign(runtimeVersion,version);
     }
-    query.mockRejectedValueOnce(new Error('disposable connection error'));
-    await expect(verify()).rejects.toThrow();
   });
-  it('classifies each stage without returning provider details',async()=>{
+  it('rejects runtime engine overrides',()=>{
+    try {
+      vi.stubEnv('PRISMA_QUERY_ENGINE_LIBRARY','unreviewed-library');
+      expect(()=>strictPreviewDatabaseUrl(base+'?sslmode=require',host)).toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it('classifies failures without returning provider details and only passes exact live identity',async()=>{
     const env={DIRECT_DATABASE_URL:base+'?sslmode=require',PREVIEW_DATABASE_HOST:host};
     const secretError=new Error('postgresql://fixture:fake-secret@private.invalid/database');
     const client={
       $connect:vi.fn(async()=>{}),
       $disconnect:vi.fn(async()=>{}),
-      $queryRaw:vi.fn<() => Promise<{databaseMatches:boolean;roleMatches:boolean;ssl:boolean|null}[]>>(),
+      $queryRaw:vi.fn<() => Promise<{databaseMatches:boolean;roleMatches:boolean}[]>>(),
     };
-    const create=()=>client;
+    const create=vi.fn<(url:string)=>typeof client>(()=>client);
     expect(await diagnosePreviewTls({},create)).toBe(10);
-    expect(client.$connect).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
     expect(await diagnosePreviewTls(env,()=>{throw secretError;})).toBe(16);
     client.$connect.mockRejectedValueOnce(secretError);
     expect(await diagnosePreviewTls(env,create)).toBe(11);
+    expect(new URL(create.mock.calls[0]?.[0]??'').searchParams.get('sslaccept')).toBe('strict');
     client.$queryRaw.mockRejectedValueOnce(secretError);
     expect(await diagnosePreviewTls(env,create)).toBe(12);
     for(const [rows,code] of [
-      [[{databaseMatches:true,roleMatches:true,ssl:true}],0],
-      [[{databaseMatches:false,roleMatches:true,ssl:true}],13],
-      [[{databaseMatches:true,roleMatches:false,ssl:true}],13],
-      [[{databaseMatches:true,roleMatches:true,ssl:false}],14],
-      [[{databaseMatches:true,roleMatches:true,ssl:null}],15],
+      [[{databaseMatches:true,roleMatches:true}],0],
+      [[{databaseMatches:false,roleMatches:true}],13],
+      [[{databaseMatches:true,roleMatches:false}],13],
       [[],15],
+      [[{databaseMatches:true,roleMatches:true},{databaseMatches:true,roleMatches:true}],15],
     ] as const) {
       client.$queryRaw.mockResolvedValueOnce([...rows]);
       expect(await diagnosePreviewTls(env,create)).toBe(code);
     }
-    client.$queryRaw.mockResolvedValueOnce([{databaseMatches:true,roleMatches:true,ssl:true}]);
+    client.$queryRaw.mockResolvedValueOnce([{databaseMatches:true,roleMatches:true}]);
     client.$disconnect.mockRejectedValueOnce(secretError);
     expect(await diagnosePreviewTls(env,create)).toBe(16);
   });
-});
-
-const fixture=process.env.TLS_PREFLIGHT_TEST_DATABASE_URL;
-if(fixture)assertDisposableTestDatabase(fixture,process.env.DATABASE_LIFECYCLE_MARKER);
-it.skipIf(!fixture)('distinguishes TLS and plaintext on real disposable PostgreSQL sessions',async()=>{
-  for(const [mode,expected] of [['require',true],['disable',false]] as const) {
-    const url=new URL(fixture!);
-    url.searchParams.set('sslmode',mode);
-    const db=new PrismaClient({datasources:{db:{url:url.href}}});
-    try {
-      const database=decodeURIComponent(url.pathname.slice(1));
-      const role=decodeURIComponent(url.username);
-      await expect(verifySessionTls(db,database,role)).resolves.toBe(expected);
-      await expect(verifySessionTls(db,database,'unexpected_role')).resolves.toBe(false);
-      const env={
-        DIRECT_DATABASE_URL:`postgresql://bbb_preview_deploy_lp:fixture@${recoveryScope.databaseHost}/bbb_practice_preview?sslmode=require`,
-        PREVIEW_DATABASE_HOST:recoveryScope.databaseHost,
-      };
-      // Keep the production target guard intact while replacing only the client
-      // with a disposable database whose name intentionally fails live identity.
-      await expect(diagnosePreviewTls(env,()=>db)).resolves.toBe(13);
-      const badPassword=new URL(url);
-      badPassword.password='deliberately_wrong_fixture_password';
-      await expect(diagnosePreviewTls(env,()=>new PrismaClient({datasources:{db:{url:badPassword.href}}}))).resolves.toBe(11);
-    } finally {
-      await db.$disconnect();
-    }
-  }
 });

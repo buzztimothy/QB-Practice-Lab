@@ -49,5 +49,6 @@ jobs:
       - name: Run application and disposable fence migration tests
         env:
           DATABASE_LIFECYCLE_MARKER: disposable-test
+          STRICT_TLS_DISPOSABLE_TESTS: '1'
           FENCE_INSTALL_TEST_DATABASE_URL: postgresql://bbb_preview_deploy_lp:disposable_deploy@localhost:5432/qb_fence_validation?sslmode=disable
         run: pnpm test
