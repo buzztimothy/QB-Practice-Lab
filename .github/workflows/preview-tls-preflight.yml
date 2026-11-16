@@ -61,8 +61,7 @@ jobs:
             11) echo TLS_PREFLIGHT_CONNECTION_FAILED ;;
             12) echo TLS_PREFLIGHT_QUERY_FAILED ;;
             13) echo TLS_PREFLIGHT_IDENTITY_MISMATCH ;;
-            14) echo TLS_PREFLIGHT_BACKEND_TLS_FALSE ;;
-            15) echo TLS_PREFLIGHT_TLS_UNAVAILABLE ;;
+            15) echo TLS_PREFLIGHT_IDENTITY_UNAVAILABLE ;;
             *) echo TLS_PREFLIGHT_INTERNAL_FAILED ;;
           esac
           test "$result" = 0

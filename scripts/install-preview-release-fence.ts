@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
-import { assertPreviewDeployDatabase } from './database-target-guard.js';
-import { databaseIdentity, eligibility, recoveryScope, requireGate } from './recovery-workflow.js';
+import { strictPreviewDatabaseUrl } from './strict-preview-connection.js';
+import { databaseIdentity, eligibility, requireGate } from './recovery-workflow.js';
 import { previewReleaseLockKey } from './preview-release-lock.js';
 import { installIntegrity, migrationFiles, validateDispatch, validateIdleRuns, validateLedger, verifyDatabaseIdle, verifyInstalled, type LedgerRow } from './release-fence-install.js';
 
@@ -27,12 +27,7 @@ try {
   };
   source(); await idle();
   stage='TARGET';
-  requireGate(env.PREVIEW_DATABASE_HOST===recoveryScope.databaseHost);
-  const url=env.DIRECT_DATABASE_URL!;
-  assertPreviewDeployDatabase(url,'bbb_practice_preview',env.PREVIEW_DATABASE_HOST);
-  const target=new URL(url);
-  requireGate(!target.searchParams.has('options') && !target.searchParams.has('pgbouncer') && !target.searchParams.has('sslaccept'));
-  requireGate(!target.searchParams.has('schema') || target.searchParams.get('schema')==='public');
+  const url=strictPreviewDatabaseUrl(env.DIRECT_DATABASE_URL??'',env.PREVIEW_DATABASE_HOST);
   db=new PrismaClient({datasources:{db:{url}}});
   lock=new PrismaClient({datasources:{db:{url}}});
   const database=db;
