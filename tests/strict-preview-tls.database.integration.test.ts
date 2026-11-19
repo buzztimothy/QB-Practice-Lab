@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -103,28 +103,24 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
     run('createdb','-U',role,'bbb_practice_preview');
     const exactIdentityUrl=new URL(fixtureUrl());
     exactIdentityUrl.pathname='/bbb_practice_preview';
-    let launcherEvidence={empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false,code:'NONE'};
+    const probeRoot=join(root,'probe-project');
+    if(process.platform!=='win32') {
+      mkdirSync(join(probeRoot,'prisma'),{recursive:true});
+      for(const file of ['package.json','pnpm-lock.yaml','pnpm-workspace.yaml'])cpSync(file,join(probeRoot,file));
+      cpSync('prisma/schema.prisma',join(probeRoot,'prisma/schema.prisma'));
+      // Model the probe workflow's credential-free build under the exact
+      // PATH/HOME environment later used by the credentialed subprocess.
+      execFileSync('pnpm',['install','--frozen-lockfile'],{
+        cwd:probeRoot,env:{PATH:process.env.PATH,HOME:process.env.HOME},
+        stdio:['ignore','pipe','pipe'],timeout:120_000,
+      });
+    }
     const readonlyProbe=(url:string)=>runReadOnlyPrismaProbe(url,process.env,(command,args,options)=>{
-      // On GitHub/Linux exercise pnpm itself with the production minimal env.
-      // Windows has a .cmd shim, so use the pinned CLI JS for the local test.
-      const child=process.platform==='win32'
+      return process.platform==='win32'
         ? spawn(process.execPath,[resolve('node_modules/prisma/build/index.js'),...args.slice(2)],options)
-        : spawn(command,args,options);
-      let bounded='';
-      const inspect=(chunk:Buffer)=>{
-        bounded=(bounded+chunk.toString('utf8')).slice(0,8192);
-        launcherEvidence={empty:/empty/i.test(bounded),stdin:/stdin/i.test(bounded),
-          pnpm:/ERR_PNPM_/.test(bounded),missing:/ENOENT|not found|Cannot find/i.test(bounded),
-          permission:/EACCES|permission denied/i.test(bounded),schema:/schema/i.test(bounded),
-          code:bounded.match(/\bERR_PNPM_[A-Z_]{1,80}\b/)?.[0]??'UNLISTED'};
-      };
-      child.stdout?.on('data',inspect);
-      child.stderr?.on('data',inspect);
-      return child;
+        : spawn(command,args,{...options,cwd:probeRoot});
     }).then(()=> 'PASS',error=>error.classification);
-    expect({result:await readonlyProbe(exactIdentityUrl.href),launcherEvidence}).toEqual({
-      result:'PASS',launcherEvidence:{empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false,code:'NONE'},
-    });
+    expect(await readonlyProbe(exactIdentityUrl.href)).toBe('PASS');
     expect(await readonlyProbe(fixtureUrl())).toBe('MIGRATION_UNKNOWN_FAILED');
     const untrustedProbeUrl=new URL(exactIdentityUrl);
     untrustedProbeUrl.searchParams.delete('sslcert');
@@ -152,4 +148,4 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
     if(started)docker('stop',container);
     rmSync(root,{recursive:true,force:true});
   }
-},180_000);
+},300_000);

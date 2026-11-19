@@ -64,6 +64,7 @@ describe('protected read-only Prisma probe',()=>{
     for(const [classification,code] of [
       ['MIGRATION_SUBPROCESS_START_FAILED',11],['MIGRATION_CONNECTION_FAILED',14],
       ['MIGRATION_TLS_FAILED',15],['MIGRATION_SQL_FAILED',16],['MIGRATION_ENGINE_FAILED',19],
+      ['MIGRATION_DEPENDENCIES_MISMATCH',22],
     ] as const) {
       vi.mocked(runReadOnlyPrismaProbe).mockRejectedValueOnce(new MigrationProcessError(classification));
       expect(await previewPrismaProbe(env)).toBe(code);

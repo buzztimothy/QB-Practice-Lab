@@ -36,10 +36,11 @@ jobs:
           node-version: 22
       - name: Build reviewed code without operator credentials
         run: |
-          pnpm install --frozen-lockfile
-          pnpm rebuild
-          pnpm db:generate
-          pnpm build
+          build() { env -i PATH="$PATH" HOME="$HOME" pnpm "$@"; }
+          build install --frozen-lockfile
+          build rebuild
+          build db:generate
+          build build
       - name: Run the fixed SELECT-only subprocess probe
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,6 +71,7 @@ jobs:
             18) echo PRISMA_PROBE_HISTORY_FAILED ;;
             19) echo PRISMA_PROBE_ENGINE_FAILED ;;
             21) echo PRISMA_PROBE_TARGET_REJECTED ;;
+            22) echo PRISMA_PROBE_DEPENDENCIES_MISMATCH ;;
             *) echo PRISMA_PROBE_UNKNOWN_FAILED ;;
           esac
           test "$result" = 0

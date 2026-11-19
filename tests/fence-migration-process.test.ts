@@ -50,6 +50,8 @@ describe('bounded migration subprocess diagnostics',()=>{
       ['Error: Schema engine exited. private details','MIGRATION_ENGINE_FAILED'],
       ['SQL contains P1011 without a CLI header','MIGRATION_UNKNOWN_FAILED'],
       ['Error: unrecognized failure\nProvider response: private\nError: P1011','MIGRATION_UNKNOWN_FAILED'],
+      ['ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY private payload','MIGRATION_DEPENDENCIES_MISMATCH'],
+      ['ERR_PNPM_VERIFY_DEPS_BEFORE_RUN private payload','MIGRATION_DEPENDENCIES_MISMATCH'],
       ['Error: P3018\nDatabase response contains Error: P1011','MIGRATION_SQL_FAILED'],
       ['x'.repeat(65_536)+'\nError: P1011','MIGRATION_UNKNOWN_FAILED'],
     ]) {

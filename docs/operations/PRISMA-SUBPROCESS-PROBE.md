@@ -12,7 +12,7 @@ Select **Read-only Preview Prisma subprocess probe** in Actions, choose main, en
 
 ## Execution and output
 
-The workflow builds without Preview credentials. Its sole credentialed step validates source, protected main, exact SHA, first manual attempt, freeze input, and all non-completed Actions runs. A competing or truncated inventory fails closed. These checks run again after the subprocess.
+The workflow builds without Preview credentials under the same PATH/HOME-only environment used by the child. Its sole credentialed step validates source, protected main, exact SHA, first manual attempt, freeze input, and all non-completed Actions runs. A competing or truncated inventory fails closed. These checks run again after the subprocess.
 
 The original URL passes the shared `strictPreviewDatabaseUrl` guard before deriving `sslmode=require&sslaccept=strict`. The child receives only PATH, HOME and this derived DATABASE_URL. It runs exactly `pnpm exec prisma db execute --schema prisma/schema.prisma --stdin`, with this fixed stdin.
 
@@ -28,7 +28,9 @@ The expression succeeds only for the exact live database and deploy role. Other 
 
 Output is capped at 32 KiB per stream, kept only in memory, and discarded after classification. Missing/failed stdin, truncated or unreadable output, nonzero exit, signal, timeout, unsupported connector, target drift or release-guard failure blocks PASS. Raw Node and provider output are suppressed by the workflow. Fixed `PRISMA_PROBE_*` labels cover these categories. Native SQL errors without a recognized Prisma code, including the tested division-by-zero identity failure, produce `PRISMA_PROBE_UNKNOWN_FAILED`. `PRISMA_PROBE_SQL_OR_IDENTITY_FAILED` does not assert that every SQL failure is an identity mismatch.
 
-Existing credentials and system certificate roots are reused. No secret, environment configuration, migration history or application data changes are part of this probe. Passing verifies only this SELECT-only connection on that runner at that time. Future installation still requires fresh gates, baselines and separate authorization.
+Existing credentials and system certificate roots are reused. No GitHub environment settings, secrets, migration history or application data changes are part of this probe. Passing verifies only this SELECT-only connection on that runner at that time. Future installation still requires fresh gates, baselines and separate authorization.
+
+Disposable Linux CI reproduced `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` when a full-environment installation was followed by the minimal-environment pnpm child. That launcher attempted dependency repair and stopped without a terminal. The workflow now aligns the credential-free install/build environment with the child. Repository setting `verifyDepsBeforeRun: error` retains dependency verification and prohibits automatic repair before command execution. A mismatch produces the fixed `PRISMA_PROBE_DEPENDENCIES_MISMATCH` label. No prompt bypass or dependency-verification disablement is used. This reproduced mechanism is a candidate explanation for the earlier installer failure; its discarded historical output prevents confirmation. The installer workflow's build environment is outside this probe change.
 
 ## Validation
 

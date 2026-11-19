@@ -15,6 +15,7 @@ const failureExits:Record<MigrationFailure,number>={
   MIGRATION_HISTORY_FAILED:18,
   MIGRATION_ENGINE_FAILED:19,
   MIGRATION_UNKNOWN_FAILED:20,
+  MIGRATION_DEPENDENCIES_MISMATCH:22,
 };
 
 async function verifySourceAndIdle(env:NodeJS.ProcessEnv) {

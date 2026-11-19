@@ -10,6 +10,7 @@ export type MigrationFailure =
   | 'MIGRATION_CONFIGURATION_FAILED'
   | 'MIGRATION_HISTORY_FAILED'
   | 'MIGRATION_ENGINE_FAILED'
+  | 'MIGRATION_DEPENDENCIES_MISMATCH'
   | 'MIGRATION_UNKNOWN_FAILED';
 
 export class MigrationProcessError extends Error {
@@ -33,6 +34,8 @@ const prismaFailures: Readonly<Record<string,MigrationFailure>> = {
 function classify(output: string): MigrationFailure {
   // eslint-disable-next-line no-control-regex -- Remove intentional ANSI ESC color sequences.
   const plain=output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g,'');
+  if(/\bERR_PNPM_(?:ABORTED_REMOVE_MODULES_DIR_NO_TTY|VERIFY_DEPS_BEFORE_RUN)\b/.test(plain))
+    return 'MIGRATION_DEPENDENCIES_MISMATCH';
   // Only recognize the CLI's error header, never arbitrary embedded code tokens.
   const header=plain.match(/^Error:[ \t]*([^\r\n]*)/m)?.[1];
   const code=header?.match(/^(P[0-9]{4})\b/)?.[1];
