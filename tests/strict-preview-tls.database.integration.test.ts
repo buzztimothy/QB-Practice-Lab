@@ -103,14 +103,27 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
     run('createdb','-U',role,'bbb_practice_preview');
     const exactIdentityUrl=new URL(fixtureUrl());
     exactIdentityUrl.pathname='/bbb_practice_preview';
+    let launcherEvidence={empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false};
     const readonlyProbe=(url:string)=>runReadOnlyPrismaProbe(url,process.env,(command,args,options)=>{
       // On GitHub/Linux exercise pnpm itself with the production minimal env.
       // Windows has a .cmd shim, so use the pinned CLI JS for the local test.
-      return process.platform==='win32'
+      const child=process.platform==='win32'
         ? spawn(process.execPath,[resolve('node_modules/prisma/build/index.js'),...args.slice(2)],options)
         : spawn(command,args,options);
+      let bounded='';
+      const inspect=(chunk:Buffer)=>{
+        bounded=(bounded+chunk.toString('utf8')).slice(0,8192);
+        launcherEvidence={empty:/empty/i.test(bounded),stdin:/stdin/i.test(bounded),
+          pnpm:/ERR_PNPM_/.test(bounded),missing:/ENOENT|not found|Cannot find/i.test(bounded),
+          permission:/EACCES|permission denied/i.test(bounded),schema:/schema/i.test(bounded)};
+      };
+      child.stdout?.on('data',inspect);
+      child.stderr?.on('data',inspect);
+      return child;
     }).then(()=> 'PASS',error=>error.classification);
-    expect(await readonlyProbe(exactIdentityUrl.href)).toBe('PASS');
+    expect({result:await readonlyProbe(exactIdentityUrl.href),launcherEvidence}).toEqual({
+      result:'PASS',launcherEvidence:expect.any(Object),
+    });
     expect(await readonlyProbe(fixtureUrl())).toBe('MIGRATION_UNKNOWN_FAILED');
     const untrustedProbeUrl=new URL(exactIdentityUrl);
     untrustedProbeUrl.searchParams.delete('sslcert');
