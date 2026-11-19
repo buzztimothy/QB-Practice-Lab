@@ -1,6 +1,7 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
 import { strictPreviewDatabaseUrl } from './strict-preview-connection.js';
+import { MigrationProcessError, runFenceMigration } from './fence-migration-process.js';
 import { databaseIdentity, eligibility, requireGate } from './recovery-workflow.js';
 import { previewReleaseLockKey } from './preview-release-lock.js';
 import { installIntegrity, migrationFiles, validateDispatch, validateIdleRuns, validateLedger, verifyDatabaseIdle, verifyInstalled, type LedgerRow } from './release-fence-install.js';
@@ -52,11 +53,7 @@ try {
       await gates();
       requireGate(await installIntegrity(database)===before);
       stage='PRISMA_MIGRATE_DEPLOY';
-      await new Promise<void>((resolve,reject)=>{
-        const child=spawn('pnpm',['exec','prisma','migrate','deploy'],{env:{PATH:env.PATH,HOME:env.HOME,DATABASE_URL:url},stdio:'ignore',timeout:120_000});
-        child.once('error',()=>reject(new Error('MIGRATION_FAILED')));
-        child.once('close',code=>code===0?resolve():reject(new Error('MIGRATION_FAILED')));
-      });
+      await runFenceMigration(url,env);
       stage='POSTCHECK';
       await tx.$queryRaw`SELECT pg_backend_pid()`;
       await verifyInstalled(database); await databaseIdentity(database); await eligibility(database);
@@ -67,8 +64,10 @@ try {
     }
   },{timeout:240_000});
   console.log(JSON.stringify({success:true,migration:'202610220001_preview_release_fence',ledgerChecksum:true,singletonUnheld:true,runtimeReadOnly:true,integrityUnchanged:true}));
-} catch {
-  console.error(JSON.stringify({success:false,stage,status:'BLOCKED_INSPECTION_REQUIRED_NO_RETRY_KEEP_OPERATOR_FREEZE'}));
+} catch (error) {
+  console.error(JSON.stringify({success:false,stage,
+    ...(error instanceof MigrationProcessError?{migrationFailure:error.classification}:{}),
+    status:'BLOCKED_INSPECTION_REQUIRED_NO_RETRY_KEEP_OPERATOR_FREEZE'}));
   process.exitCode=1;
 } finally {
   await Promise.allSettled([db?.$disconnect(),lock?.$disconnect()]);

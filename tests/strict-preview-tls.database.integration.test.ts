@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,7 @@ import { strictPreviewDatabaseUrl } from '../scripts/strict-preview-connection.j
 import { diagnosePreviewTls } from '../scripts/preview-tls-preflight.js';
 import { recoveryScope } from '../scripts/recovery-workflow.js';
 import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
+import { runFenceMigration } from '../scripts/fence-migration-process.js';
 
 // Explicit opt-in creates only a new disposable, loopback-bound Docker service.
 it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned native connector certificate and TLS policy',async()=>{
@@ -76,12 +77,27 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
         return true;
       } catch { return false; }
     };
+    const classifiedProbe=(url:string)=>runFenceMigration(url,process.env,(_command,_args,options)=>{
+      // Exercise real CLI diagnostics using SELECT only. Production keeps the
+      // fixed pnpm migrate deploy invocation covered by the subprocess test.
+      const child=spawn(process.execPath,[resolve('node_modules/prisma/build/index.js'),
+        'db','execute','--schema',resolve('prisma/schema.prisma'),'--stdin'],{
+        ...options,stdio:['pipe','pipe','pipe'],
+      });
+      child.stdin?.end('SELECT 1;');
+      return child;
+    }).then(()=> 'PASS',error=>error.classification);
     expect(await connects(fixtureUrl())).toBe(true);
     expect(schemaEngineConnects(fixtureUrl())).toBe(true);
+    expect(await classifiedProbe(fixtureUrl())).toBe('PASS');
     expect(await connects(fixtureUrl('127.0.0.1'))).toBe(false);
     expect(schemaEngineConnects(fixtureUrl('127.0.0.1'))).toBe(false);
     expect(await connects(fixtureUrl('localhost',false))).toBe(false);
     expect(schemaEngineConnects(fixtureUrl('localhost',false))).toBe(false);
+    expect(await classifiedProbe(fixtureUrl('localhost',false))).toBe('MIGRATION_TLS_FAILED');
+    const badPassword=new URL(fixtureUrl());
+    badPassword.password='deliberately_wrong_fixture_password';
+    expect(await classifiedProbe(badPassword.href)).toBe('MIGRATION_CONNECTION_FAILED');
     // The production guard remains exact. The injected client targets only the
     // disposable DB, so its live identity must fail even with valid TLS.
     expect(await diagnosePreviewTls(env,()=>new PrismaClient({datasources:{db:{url:fixtureUrl()}}}))).toBe(13);
