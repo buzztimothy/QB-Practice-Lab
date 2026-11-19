@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { afterEach, expect, it, vi } from 'vitest';
 
 const fixture=vi.hoisted(()=>({
@@ -25,6 +26,7 @@ vi.mock('node:child_process',()=>({
   spawn:(_command:string,_args:string[],options:{env:NodeJS.ProcessEnv})=>{
     fixture.childEnvironment=options.env;
     const child=new EventEmitter();
+    Object.assign(child,{stdout:new PassThrough(),stderr:new PassThrough()});
     queueMicrotask(()=>child.emit('close',0));
     return child;
   },
