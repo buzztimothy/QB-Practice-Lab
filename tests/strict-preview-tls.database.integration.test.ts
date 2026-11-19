@@ -116,21 +116,7 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
         launcherEvidence={empty:/empty/i.test(bounded),stdin:/stdin/i.test(bounded),
           pnpm:/ERR_PNPM_/.test(bounded),missing:/ENOENT|not found|Cannot find/i.test(bounded),
           permission:/EACCES|permission denied/i.test(bounded),schema:/schema/i.test(bounded),
-          code:[
-            'ERR_PNPM_UNEXPECTED_STORE','ERR_PNPM_BAD_PM_VERSION','ERR_PNPM_UNSUPPORTED_ENGINE',
-            'ERR_PNPM_NO_GLOBAL_BIN_DIR','ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND',
-            'ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL','ERR_PNPM_OUTDATED_LOCKFILE',
-            'ERR_PNPM_LOCKFILE_CONFIG_MISMATCH','ERR_PNPM_NODE_LINKER_DIFF',
-            'ERR_PNPM_HOIST_PATTERN_DIFF','ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF',
-            'ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF','ERR_PNPM_CANNOT_MANAGE_NODE',
-            'ERR_PNPM_NO_NODE_BIN_DIR','ERR_PNPM_CONFIG_DEP_NO_LOCKFILE',
-            'ERR_PNPM_PNPM_ENGINE_IDENTITY_UNVERIFIABLE','ERR_PNPM_BROKEN_PNPM_INSTALL',
-            'ERR_PNPM_BROKEN_PNPM_RELEASE','ERR_PNPM_CANNOT_RESOLVE_PNPM',
-            'ERR_PNPM_VERIFY_DEPS_BEFORE_RUN','ERR_PNPM_NO_SHELL_EMULATOR',
-            'ERR_PNPM_GLOBAL_BIN_DIR_NOT_IN_PATH','ERR_PNPM_BAD_OPTIONS',
-            'ERR_PNPM_CHILD_PROCESS_FAILED','ERR_PNPM_PROJECT_INACCESSIBLE',
-            'ERR_PNPM_UNEXPECTED_VIRTUAL_STORE','ERR_PNPM_EXEC_MISSING_COMMAND',
-          ].find(code=>bounded.includes(code))??'UNLISTED'};
+          code:bounded.match(/\bERR_PNPM_[A-Z_]{1,80}\b/)?.[0]??'UNLISTED'};
       };
       child.stdout?.on('data',inspect);
       child.stderr?.on('data',inspect);
