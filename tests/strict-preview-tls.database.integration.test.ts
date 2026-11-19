@@ -103,7 +103,7 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
     run('createdb','-U',role,'bbb_practice_preview');
     const exactIdentityUrl=new URL(fixtureUrl());
     exactIdentityUrl.pathname='/bbb_practice_preview';
-    let launcherEvidence={empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false};
+    let launcherEvidence={empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false,code:'NONE'};
     const readonlyProbe=(url:string)=>runReadOnlyPrismaProbe(url,process.env,(command,args,options)=>{
       // On GitHub/Linux exercise pnpm itself with the production minimal env.
       // Windows has a .cmd shim, so use the pinned CLI JS for the local test.
@@ -115,14 +115,23 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
         bounded=(bounded+chunk.toString('utf8')).slice(0,8192);
         launcherEvidence={empty:/empty/i.test(bounded),stdin:/stdin/i.test(bounded),
           pnpm:/ERR_PNPM_/.test(bounded),missing:/ENOENT|not found|Cannot find/i.test(bounded),
-          permission:/EACCES|permission denied/i.test(bounded),schema:/schema/i.test(bounded)};
+          permission:/EACCES|permission denied/i.test(bounded),schema:/schema/i.test(bounded),
+          code:[
+            'ERR_PNPM_UNEXPECTED_STORE','ERR_PNPM_BAD_PM_VERSION','ERR_PNPM_UNSUPPORTED_ENGINE',
+            'ERR_PNPM_NO_GLOBAL_BIN_DIR','ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND',
+            'ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL','ERR_PNPM_OUTDATED_LOCKFILE',
+            'ERR_PNPM_LOCKFILE_CONFIG_MISMATCH','ERR_PNPM_NODE_LINKER_DIFF',
+            'ERR_PNPM_HOIST_PATTERN_DIFF','ERR_PNPM_PUBLIC_HOIST_PATTERN_DIFF',
+            'ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF','ERR_PNPM_CANNOT_MANAGE_NODE',
+            'ERR_PNPM_NO_NODE_BIN_DIR','ERR_PNPM_CONFIG_DEP_NO_LOCKFILE',
+          ].find(code=>bounded.includes(code))??'UNLISTED'};
       };
       child.stdout?.on('data',inspect);
       child.stderr?.on('data',inspect);
       return child;
     }).then(()=> 'PASS',error=>error.classification);
     expect({result:await readonlyProbe(exactIdentityUrl.href),launcherEvidence}).toEqual({
-      result:'PASS',launcherEvidence:{empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false},
+      result:'PASS',launcherEvidence:{empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false,code:'NONE'},
     });
     expect(await readonlyProbe(fixtureUrl())).toBe('MIGRATION_UNKNOWN_FAILED');
     const untrustedProbeUrl=new URL(exactIdentityUrl);
