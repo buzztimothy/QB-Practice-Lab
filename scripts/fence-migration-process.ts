@@ -25,6 +25,7 @@ const prismaFailures: Readonly<Record<string,MigrationFailure>> = {
   P1008:'MIGRATION_TIMEOUT', P1010:'MIGRATION_CONNECTION_FAILED',
   P1011:'MIGRATION_TLS_FAILED', P1017:'MIGRATION_CONNECTION_FAILED',
   P1012:'MIGRATION_CONFIGURATION_FAILED', P1013:'MIGRATION_CONFIGURATION_FAILED',
+  P2010:'MIGRATION_SQL_FAILED',
   P3015:'MIGRATION_CONFIGURATION_FAILED', P3019:'MIGRATION_CONFIGURATION_FAILED',
   P3009:'MIGRATION_HISTORY_FAILED', P3018:'MIGRATION_SQL_FAILED',
 };
@@ -47,17 +48,39 @@ export async function runFenceMigration(
   env: NodeJS.ProcessEnv,
   launch: MigrationSpawner = spawn,
 ): Promise<void> {
+  return runPrismaProcess(strictUrl,env,['exec','prisma','migrate','deploy'],undefined,launch);
+}
+
+export const prismaProbeSql = `SELECT 1 / CASE
+  WHEN current_database() = 'bbb_practice_preview'
+   AND current_user = 'bbb_preview_deploy_lp'
+  THEN 1 ELSE 0
+END;`;
+
+export async function runReadOnlyPrismaProbe(
+  strictUrl: string,
+  env: NodeJS.ProcessEnv,
+  launch: MigrationSpawner = spawn,
+): Promise<void> {
+  return runPrismaProcess(strictUrl,env,
+    ['exec','prisma','db','execute','--schema','prisma/schema.prisma','--stdin'],prismaProbeSql,launch);
+}
+
+async function runPrismaProcess(
+  strictUrl:string,env:NodeJS.ProcessEnv,args:string[],input:string|undefined,launch:MigrationSpawner,
+):Promise<void> {
   await new Promise<void>((resolve,reject)=>{
     let timedOut=false, started=false, processError=false, unreadable=false, truncated=false;
+    let inputWritten=input===undefined;
     let stdout=Buffer.alloc(0), stderr=Buffer.alloc(0);
     // Mirror the existing subprocess deadline. Node still performs the kill.
     const deadline=setTimeout(()=>{timedOut=true;},120_000);
     let child:ChildProcess;
     try {
-      child=launch('pnpm',['exec','prisma','migrate','deploy'],{
+      child=launch('pnpm',args,{
         cwd:process.cwd(),
         env:{PATH:env.PATH,HOME:env.HOME,DATABASE_URL:strictUrl},
-        stdio:['ignore','pipe','pipe'],timeout:120_000,
+        stdio:[input===undefined?'ignore':'pipe','pipe','pipe'],timeout:120_000,
       });
     } catch {
       clearTimeout(deadline);
@@ -75,12 +98,17 @@ export async function runFenceMigration(
     child.stderr?.on('error',()=>{unreadable=true;});
     child.once('spawn',()=>{started=true;});
     child.once('error',()=>{processError=true;});
+    if(input!==undefined) {
+      child.stdin?.on('error',()=>{unreadable=true;});
+      child.stdin?.end(input,()=>{inputWritten=true;});
+    }
     child.once('close',(code:number|null,signal:NodeJS.Signals|null)=>{
       clearTimeout(deadline);
       let failure:MigrationFailure|undefined;
       if(timedOut)failure='MIGRATION_TIMEOUT';
       else if(processError)failure=started?'MIGRATION_UNKNOWN_FAILED':'MIGRATION_SUBPROCESS_START_FAILED';
       else if(signal)failure='MIGRATION_SUBPROCESS_SIGNALLED';
+      else if(input!==undefined && (!inputWritten||unreadable||truncated))failure='MIGRATION_UNKNOWN_FAILED';
       else if(code!==0)failure=truncated||unreadable
         ? 'MIGRATION_UNKNOWN_FAILED'
         : classify(stderr.toString('utf8')+'\n'+stdout.toString('utf8'));

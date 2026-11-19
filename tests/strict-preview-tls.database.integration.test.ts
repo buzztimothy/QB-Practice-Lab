@@ -9,7 +9,7 @@ import { strictPreviewDatabaseUrl } from '../scripts/strict-preview-connection.j
 import { diagnosePreviewTls } from '../scripts/preview-tls-preflight.js';
 import { recoveryScope } from '../scripts/recovery-workflow.js';
 import { assertDisposableTestDatabase } from '../scripts/database-target-guard.js';
-import { runFenceMigration } from '../scripts/fence-migration-process.js';
+import { runFenceMigration, runReadOnlyPrismaProbe } from '../scripts/fence-migration-process.js';
 
 // Explicit opt-in creates only a new disposable, loopback-bound Docker service.
 it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned native connector certificate and TLS policy',async()=>{
@@ -98,6 +98,33 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
     const badPassword=new URL(fixtureUrl());
     badPassword.password='deliberately_wrong_fixture_password';
     expect(await classifiedProbe(badPassword.href)).toBe('MIGRATION_CONNECTION_FAILED');
+    // This literal identity exists only inside our newly created Docker
+    // container. No general disposable-target guard is weakened or changed.
+    run('createdb','-U',role,'bbb_practice_preview');
+    const exactIdentityUrl=new URL(fixtureUrl());
+    exactIdentityUrl.pathname='/bbb_practice_preview';
+    const readonlyProbe=(url:string)=>runReadOnlyPrismaProbe(url,process.env,(command,args,options)=>{
+      // On GitHub/Linux exercise pnpm itself with the production minimal env.
+      // Windows has a .cmd shim, so use the pinned CLI JS for the local test.
+      return process.platform==='win32'
+        ? spawn(process.execPath,[resolve('node_modules/prisma/build/index.js'),...args.slice(2)],options)
+        : spawn(command,args,options);
+    }).then(()=> 'PASS',error=>error.classification);
+    expect(await readonlyProbe(exactIdentityUrl.href)).toBe('PASS');
+    expect(await readonlyProbe(fixtureUrl())).toBe('MIGRATION_UNKNOWN_FAILED');
+    const untrustedProbeUrl=new URL(exactIdentityUrl);
+    untrustedProbeUrl.searchParams.delete('sslcert');
+    expect(await readonlyProbe(untrustedProbeUrl.href)).toBe('MIGRATION_TLS_FAILED');
+    const badProbePassword=new URL(exactIdentityUrl);
+    badProbePassword.password='deliberately_wrong_fixture_password';
+    expect(await readonlyProbe(badProbePassword.href)).toBe('MIGRATION_CONNECTION_FAILED');
+    const probeDb=new PrismaClient({datasources:{db:{url:exactIdentityUrl.href}}});
+    try {
+      expect(await probeDb.$queryRaw`SELECT count(*)::int AS count FROM pg_tables WHERE schemaname='public'`)
+        .toEqual([{count:0}]);
+      expect(await probeDb.$queryRaw`SELECT to_regclass('public._prisma_migrations') IS NULL AS absent`)
+        .toEqual([{absent:true}]);
+    } finally { await probeDb.$disconnect(); }
     // The production guard remains exact. The injected client targets only the
     // disposable DB, so its live identity must fail even with valid TLS.
     expect(await diagnosePreviewTls(env,()=>new PrismaClient({datasources:{db:{url:fixtureUrl()}}}))).toBe(13);
@@ -111,4 +138,4 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
     if(started)docker('stop',container);
     rmSync(root,{recursive:true,force:true});
   }
-},120_000);
+},180_000);
