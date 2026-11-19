@@ -122,7 +122,7 @@ it.skipIf(process.env.STRICT_TLS_DISPOSABLE_TESTS!=='1')('enforces the pinned na
       return child;
     }).then(()=> 'PASS',error=>error.classification);
     expect({result:await readonlyProbe(exactIdentityUrl.href),launcherEvidence}).toEqual({
-      result:'PASS',launcherEvidence:expect.any(Object),
+      result:'PASS',launcherEvidence:{empty:false,stdin:false,pnpm:false,missing:false,permission:false,schema:false},
     });
     expect(await readonlyProbe(fixtureUrl())).toBe('MIGRATION_UNKNOWN_FAILED');
     const untrustedProbeUrl=new URL(exactIdentityUrl);
