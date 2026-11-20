@@ -1,7 +1,7 @@
 import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MigrationProcessError, runFenceMigration } from '../scripts/fence-migration-process.js';
+import { MigrationProcessError, prismaProbeSql, runFenceMigration, runReadOnlyPrismaProbe } from '../scripts/fence-migration-process.js';
 
 function fixture() {
   const child=new ChildProcess();
@@ -50,6 +50,8 @@ describe('bounded migration subprocess diagnostics',()=>{
       ['Error: Schema engine exited. private details','MIGRATION_ENGINE_FAILED'],
       ['SQL contains P1011 without a CLI header','MIGRATION_UNKNOWN_FAILED'],
       ['Error: unrecognized failure\nProvider response: private\nError: P1011','MIGRATION_UNKNOWN_FAILED'],
+      ['ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY private payload','MIGRATION_DEPENDENCIES_MISMATCH'],
+      ['ERR_PNPM_VERIFY_DEPS_BEFORE_RUN private payload','MIGRATION_DEPENDENCIES_MISMATCH'],
       ['Error: P3018\nDatabase response contains Error: P1011','MIGRATION_SQL_FAILED'],
       ['x'.repeat(65_536)+'\nError: P1011','MIGRATION_UNKNOWN_FAILED'],
     ]) {
@@ -84,5 +86,38 @@ describe('bounded migration subprocess diagnostics',()=>{
     timeout.child.emit('close',null,'SIGTERM');
     expect((await timeoutRun).classification).toBe('MIGRATION_TIMEOUT');
     expect(vi.getTimerCount()).toBe(0);
+  });
+  it('fixes the probe command, SELECT-only stdin and minimal environment independently of migration execution',async()=>{
+    const f=fixture(), stdin=new PassThrough();
+    Object.assign(f.child,{stdin});
+    let input='';
+    stdin.on('data',chunk=>{input+=chunk.toString();});
+    const run=runReadOnlyPrismaProbe(url,{...env,PROBE_SQL:'DROP TABLE private',PROBE_COMMAND:'migrate deploy'},f.launch);
+    await new Promise(resolve=>setImmediate(resolve));
+    f.child.emit('close',0,null);
+    await expect(run).resolves.toBeUndefined();
+    expect(input).toBe(`SELECT 1 / CASE
+  WHEN current_database() = 'bbb_practice_preview'
+   AND current_user = 'bbb_preview_deploy_lp'
+  THEN 1 ELSE 0
+END;`);
+    expect(input).toBe(prismaProbeSql);
+    expect(f.launch.mock.calls[0]).toEqual(['pnpm',[
+      'exec','prisma','db','execute','--schema','prisma/schema.prisma','--stdin',
+    ],{
+      cwd:process.cwd(),env:{PATH:env.PATH,HOME:env.HOME,DATABASE_URL:url},
+      stdio:['pipe','pipe','pipe'],timeout:120_000,
+    }]);
+  });
+  it('fails the probe closed on missing stdin or truncated output even with exit zero',async()=>{
+    for(const missingStdin of [true,false]) {
+      const f=fixture(),stdin=new PassThrough();
+      if(!missingStdin)Object.assign(f.child,{stdin});
+      const run=runReadOnlyPrismaProbe(url,env,f.launch).catch(error=>error);
+      await new Promise(resolve=>setImmediate(resolve));
+      if(!missingStdin)f.stdout.write('x'.repeat(40_000));
+      f.child.emit('close',0,null);
+      expect((await run).classification).toBe('MIGRATION_UNKNOWN_FAILED');
+    }
   });
 });
